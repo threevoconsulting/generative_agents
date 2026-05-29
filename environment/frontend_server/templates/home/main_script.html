@@ -303,6 +303,30 @@
 	  // Expose the camera so the on-screen touch zoom buttons can drive it.
 	  window.game_camera = camera;
 
+	  // *** TOUCH GESTURES ***
+	  // Pinch-to-zoom works in every mode. Drag-to-pan is enabled only outside
+	  // play mode -- in play mode a drag must not drag your own avatar around.
+	  this.input.addPointer(2);
+	  let pinch_prev_dist = 0;
+	  this.input.on('pointermove', function (pointer) {
+	    let p1 = this.input.pointer1, p2 = this.input.pointer2;
+	    if (p1.isDown && p2.isDown) {
+	      let dist = Phaser.Math.Distance.Between(p1.x, p1.y, p2.x, p2.y);
+	      if (pinch_prev_dist > 0) {
+	        camera.setZoom(Math.max(0.2, Math.min(3,
+	                        camera.zoom * (dist / pinch_prev_dist))));
+	      }
+	      pinch_prev_dist = dist;
+	      return;
+	    }
+	    pinch_prev_dist = 0;
+	    if (!PLAY_MODE && pointer.isDown) {
+	      player.x -= (pointer.x - pointer.prevPosition.x) / camera.zoom;
+	      player.y -= (pointer.y - pointer.prevPosition.y) / camera.zoom;
+	    }
+	  }, this);
+	  this.input.on('pointerup', function () { pinch_prev_dist = 0; }, this);
+
 	  // *** SET UP PERSONAS *** 
 	  // We start by creating the game sprite objects. 
 	  for (let i=0; i<Object.keys(spawn_tile_loc).length; i++) { 
