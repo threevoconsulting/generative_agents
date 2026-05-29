@@ -1,0 +1,37 @@
+# Generative Agents -- single-container stack for Synology / Portainer.
+#
+# Deploy as a Portainer "Stack". Set ANTHROPIC_API_KEY (and optionally
+# DJANGO_ALLOWED_HOSTS) in the stack's environment variables.
+#
+# After it is up:
+#   - Open http://<nas-ip>:8000/simulator_play?name=Alex  (play mode)
+#     or http://<nas-ip>:8000/simulator_home              (watch mode)
+#   - Start the simulation backend via Portainer: Container -> Console (bash),
+#     then:  cd /app/reverie/backend_server && python reverie.py
+#     and answer the prompts (fork sim, new sim name, then `run 1000`).
+
+services:
+  generative-agents:
+    build: .
+    image: generative-agents:latest
+    container_name: generative-agents
+    ports:
+      - "8000:8000"
+    environment:
+      # REQUIRED: your Anthropic API key (Claude text generation).
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}"
+      # Allow access via the NAS LAN IP (use "*" for any host on your LAN).
+      DJANGO_ALLOWED_HOSTS: "*"
+      # Defaults already select Claude + local embeddings. Override if desired:
+      # LLM_PROVIDER: "claude"
+      # EMBEDDING_BACKEND: "local"
+    volumes:
+      # Persist simulations across restarts. On first run this named volume is
+      # seeded from the image's bundled base simulations.
+      - ga_storage:/app/environment/frontend_server/storage
+    stdin_open: true   # allow attaching a console to drive reverie.py
+    tty: true
+    restart: unless-stopped
+
+volumes:
+  ga_storage:
