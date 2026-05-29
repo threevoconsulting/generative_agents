@@ -28,9 +28,15 @@
 	// Configuration meant to be passed to the main Phaser game instance. 
 	const config = {
 	  type: Phaser.AUTO,
-	  width: 1500,
-	  height: 800,
-	  parent: "game-container",
+	  // Responsive scaling: render at a fixed design resolution and FIT it to
+	  // the parent container so the demo adapts to any screen size.
+	  scale: {
+	    mode: Phaser.Scale.FIT,
+	    autoCenter: Phaser.Scale.CENTER_BOTH,
+	    parent: "game-container",
+	    width: 1500,
+	    height: 800,
+	    zoom: 0.8 },
 	  pixelArt: true,
 	  physics: {
 	    default: "arcade",
@@ -39,8 +45,7 @@
 	  scene: {
 	    preload: preload,
 	    create: create,
-	    update: update },
-	  scale: {zoom: 0.8} };
+	    update: update } };
 
 	// const config = {
 	//   type: Phaser.AUTO,
@@ -259,8 +264,10 @@
 	  camera.startFollow(player);
 	  camera.setBounds(0, 0, map.widthInPixels, map.heightInPixels);
 	  cursors = this.input.keyboard.createCursorKeys();
+	  // Expose the camera so the on-screen touch zoom buttons can drive it.
+	  window.game_camera = camera;
 
-	  // *** SET UP PERSONAS *** 
+	  // *** SET UP PERSONAS ***
 	  // We start by creating the game sprite objects. 
 	  for (let i=0; i<Object.keys(spawn_tile_loc).length; i++) { 
 	    let persona_name = Object.keys(spawn_tile_loc)[i];
@@ -354,16 +361,18 @@
 	  const camera_speed = 400;
 	  // Stop any previous movement from the last frame
 	  player.body.setVelocity(0);
-	  if (cursors.left.isDown) {
+	  // Combine keyboard arrows with the on-screen touch D-pad (mobile).
+	  let ts = window.touch_state || {};
+	  if (cursors.left.isDown || ts.left) {
 	    player.body.setVelocityX(-camera_speed);
-	  } 
-	  if (cursors.right.isDown) {
+	  }
+	  if (cursors.right.isDown || ts.right) {
 	    player.body.setVelocityX(camera_speed);
-	  } 
-	  if (cursors.up.isDown) {
+	  }
+	  if (cursors.up.isDown || ts.up) {
 	    player.body.setVelocityY(-camera_speed);
-	  } 
-	  if (cursors.down.isDown) {
+	  }
+	  if (cursors.down.isDown || ts.down) {
 	    player.body.setVelocityY(camera_speed);
 	  }
 

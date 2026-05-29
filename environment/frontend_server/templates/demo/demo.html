@@ -109,6 +109,7 @@
 {% block js_content %}
 <script src='https://cdn.jsdelivr.net/npm/phaser@3.55.2/dist/phaser.js'></script>
 {% include 'demo/main_script.html' %}
+{% include 'home/touch_controls.html' %}
 <script>
 	{% for p in persona_names %}
 		$('#on_screen_det_trigger-{{p.underscore}}').click(function() {

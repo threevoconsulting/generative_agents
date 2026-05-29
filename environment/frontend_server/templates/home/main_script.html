@@ -45,9 +45,15 @@
 	// Configuration meant to be passed to the main Phaser game instance. 
 	const config = {
 	  type: Phaser.AUTO,
-	  width: 1500,
-	  height: 800,
-	  parent: "game-container",
+	  // Responsive scaling: the game renders at a fixed 1500x800 design
+	  // resolution and is scaled to FIT the parent container (preserving aspect
+	  // ratio and centering), so it adapts to phones, tablets and desktops.
+	  scale: {
+	    mode: Phaser.Scale.FIT,
+	    autoCenter: Phaser.Scale.CENTER_BOTH,
+	    parent: "game-container",
+	    width: 1500,
+	    height: 800 },
 	  pixelArt: true,
 	  physics: {
 	    default: "arcade",
@@ -294,6 +300,8 @@
 	  camera.startFollow(player);
 	  camera.setBounds(0, 0, map.widthInPixels, map.heightInPixels);
 	  cursors = this.input.keyboard.createCursorKeys();
+	  // Expose the camera so the on-screen touch zoom buttons can drive it.
+	  window.game_camera = camera;
 
 	  // *** SET UP PERSONAS *** 
 	  // We start by creating the game sprite objects. 
@@ -372,20 +380,22 @@
 	  const camera_speed = PLAY_MODE ? 160 : 400;
 	  // Stop any previous movement from the last frame
 	  player.body.setVelocity(0);
+	  // Combine keyboard arrows with the on-screen touch D-pad (mobile).
+	  let ts = window.touch_state || {};
 	  let player_move_dir = "";
-	  if (cursors.left.isDown) {
+	  if (cursors.left.isDown || ts.left) {
 	    player.body.setVelocityX(-camera_speed);
 	    player_move_dir = "l";
 	  }
-	  if (cursors.right.isDown) {
+	  if (cursors.right.isDown || ts.right) {
 	    player.body.setVelocityX(camera_speed);
 	    player_move_dir = "r";
 	  }
-	  if (cursors.up.isDown) {
+	  if (cursors.up.isDown || ts.up) {
 	    player.body.setVelocityY(-camera_speed);
 	    player_move_dir = "u";
 	  }
-	  if (cursors.down.isDown) {
+	  if (cursors.down.isDown || ts.down) {
 	    player.body.setVelocityY(camera_speed);
 	    player_move_dir = "d";
 	  }
