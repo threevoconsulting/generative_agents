@@ -81,6 +81,17 @@
     $transcript.scrollTop = $transcript.scrollHeight;
   }
 
+  // Apply an agent reply, whether it arrived via WebSocket push or XHR poll.
+  function applyResponse(r) {
+    if (!r) return;
+    chat_history = r.history;
+    appendLine(r.target, r.reply);
+    awaiting = false;
+    $status.innerText = "";
+  }
+  // WebSocket push hook (called from main_script.html's sim_ws.onmessage).
+  window.onPlayerChatResponse = applyResponse;
+
   function pollResponse() {
     let xhr = new XMLHttpRequest();
     xhr.open("POST", "{% url 'player_chat_response' %}", true);
@@ -89,10 +100,7 @@
       if (xhr.status !== 200) { awaiting = false; return; }
       let r = JSON.parse(xhr.responseText);
       if (r.ready) {
-        chat_history = r.history;
-        appendLine(r.target, r.reply);
-        awaiting = false;
-        $status.innerText = "";
+        applyResponse(r);
       } else {
         setTimeout(pollResponse, 600);
       }
@@ -114,18 +122,23 @@
       appendLine(player_name, text);   // display only; backend appends to history
     }
 
-    // Fire the request to the backend.
-    let xhr = new XMLHttpRequest();
-    xhr.open("POST", "{% url 'player_chat' %}", true);
-    xhr.overrideMimeType("application/json");
-    xhr.send(JSON.stringify({
+    let payload = {
       "sim_code": sim_code,
       "target": target,
       "player_name": player_name,
       "utterance": text,
       "history": chat_history,
       "end": !!end
-    }));
+    };
+    // Prefer the WebSocket (reply is pushed back); else POST + poll.
+    let sentViaWS = (typeof window.simSendChat === "function")
+                    && window.simSendChat(payload);
+    if (!sentViaWS) {
+      let xhr = new XMLHttpRequest();
+      xhr.open("POST", "{% url 'player_chat' %}", true);
+      xhr.overrideMimeType("application/json");
+      xhr.send(JSON.stringify(payload));
+    }
     $input.value = "";
 
     if (end) {
@@ -137,7 +150,7 @@
     } else {
       awaiting = true;
       $status.innerText = target + " is thinking...";
-      pollResponse();
+      if (!sentViaWS) pollResponse();  // WS replies are pushed; only poll on XHR
     }
   }
 

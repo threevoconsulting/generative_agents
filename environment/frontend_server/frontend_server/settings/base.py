@@ -73,6 +73,18 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'frontend_server.wsgi.application'
 
+# Optional real-time transport via Django Channels (WebSockets). This is fully
+# additive: if `channels` is not installed, the server runs exactly as before
+# over WSGI and the frontend automatically falls back to XHR polling. If it IS
+# installed, `runserver` serves ASGI and the WebSocket endpoint becomes
+# available, eliminating the per-frame movement polling.
+try:
+    import channels  # noqa: F401
+    INSTALLED_APPS += ['channels']
+    ASGI_APPLICATION = 'frontend_server.routing.application'
+except ImportError:
+    pass
+
 
 # Database
 # https://docs.djangoproject.com/en/2.2/ref/settings/#databases

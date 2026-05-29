@@ -116,6 +116,48 @@
 	let player_name = "{{ player_name|default:'You'|escapejs }}";
 	let player_spawn_tile = [{{ player_init_x|default:72 }}, {{ player_init_y|default:14 }}];
 
+	// *** REAL-TIME TRANSPORT ***
+	// Try a WebSocket to the backend bridge; if it is unavailable (Channels not
+	// installed/misconfigured) we transparently fall back to the original XHR
+	// polling. The WebSocket lets the server *push* movement and chat replies
+	// the instant they are ready, instead of the browser polling every frame.
+	let sim_ws = null;
+	let USE_WS = false;
+	let ws_awaiting_movement = false;
+	function wsReady() { return USE_WS && sim_ws && sim_ws.readyState === 1; }
+	(function initSimWS() {
+	  try {
+	    let proto = (location.protocol === "https:") ? "wss:" : "ws:";
+	    sim_ws = new WebSocket(proto + "//" + location.host + "/ws/sim/");
+	    sim_ws.onopen = function () { USE_WS = true; console.log("[sim] WebSocket connected"); };
+	    sim_ws.onclose = function () { USE_WS = false; };
+	    sim_ws.onerror = function () { USE_WS = false; };
+	    sim_ws.onmessage = function (e) {
+	      let msg = JSON.parse(e.data);
+	      if (msg.action === "movement") {
+	        if (msg["<step>"] == step) {
+	          execute_movement = msg;
+	          ws_awaiting_movement = false;
+	          phase = "execute";
+	        }
+	      } else if (msg.action === "player_chat_response") {
+	        if (typeof window.onPlayerChatResponse === "function") {
+	          window.onPlayerChatResponse(msg);
+	        }
+	      }
+	    };
+	  } catch (err) { USE_WS = false; }
+	})();
+	// Lets play_controls.html send chat over the WebSocket when one is open.
+	window.simSendChat = function (payload) {
+	  if (wsReady()) {
+	    payload.action = "player_chat";
+	    sim_ws.send(JSON.stringify(payload));
+	    return true;
+	  }
+	  return false;
+	};
+
 	// <tile_width> is the width of one individual tile (tiles are square)
 	let tile_width = 32;
 	// Important: tile_width % movement_speed has to be 0. 
@@ -461,16 +503,22 @@
 	        "description": "walking around the town"};
 	    }
 	    var json = JSON.stringify(data);
-	    // We then send this to the frontend server: 
-	    var retrieve_xobj = new XMLHttpRequest();
-	    retrieve_xobj.overrideMimeType("application/json");
-	    retrieve_xobj.open('POST', "{% url 'process_environment' %}", true);
-	    retrieve_xobj.send(json);   
-	    // Finally, we update the phase variable to start the "udpate" process. 
-	    // Now that we sent all persona locations to the backend server, we need
-	    // to wait until the backend determines what the personas will do next. 
+	    // Send the world state to the backend -- over the WebSocket if one is
+	    // open, otherwise via the original HTTP endpoint.
+	    if (wsReady()) {
+	      sim_ws.send(JSON.stringify({"action": "process", "step": step,
+	                                  "sim_code": sim_code,
+	                                  "environment": data["environment"]}));
+	    } else {
+	      var retrieve_xobj = new XMLHttpRequest();
+	      retrieve_xobj.overrideMimeType("application/json");
+	      retrieve_xobj.open('POST', "{% url 'process_environment' %}", true);
+	      retrieve_xobj.send(json);
+	    }
+	    // Now wait for the backend to determine what the personas do next.
+	    ws_awaiting_movement = false;
 	    phase = "update";
-	  } 
+	  }
 
 	  else if (phase == "update") { 
 	    // Update is where we * wait * for the backend server to finish 
@@ -482,7 +530,16 @@
 	    // Note that we do not want to overburden the backend too much by 
 	    // over-querying; so, we have a timer set so we only query it once every
 	    // timer_max cycles. 
-	    if (timer <= 0) {
+	    if (wsReady()) {
+	      // WebSocket path: ask once, then wait for the server to push the
+	      // movement (handled in sim_ws.onmessage, which advances the phase).
+	      if (!ws_awaiting_movement) {
+	        ws_awaiting_movement = true;
+	        sim_ws.send(JSON.stringify({"action": "await_movement",
+	                                    "step": step, "sim_code": sim_code}));
+	      }
+	    } else if (timer <= 0) {
+	      // Legacy HTTP polling fallback.
 	      var update_xobj = new XMLHttpRequest();
 	      update_xobj.overrideMimeType("application/json");
 	      update_xobj.open('POST', "{% url 'update_environment' %}", true);
@@ -497,10 +554,10 @@
 	          }
 	        }
 	      });
-	      update_xobj.send(JSON.stringify({"step": step, "sim_code": sim_code }));   
+	      update_xobj.send(JSON.stringify({"step": step, "sim_code": sim_code }));
 	    }
-	    timer = timer - 1; 
-	  } 
+	    timer = timer - 1;
+	  }
 
 	  else { 
 	    // This is where we actually move the personas in the visual world. Each
