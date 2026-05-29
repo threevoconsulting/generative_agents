@@ -158,6 +158,20 @@
 	  return false;
 	};
 
+	// Tiny transport indicator: green dot = live WebSocket, grey = polling.
+	(function () {
+	  let dot = document.createElement("div");
+	  dot.id = "ws-status-dot";
+	  dot.style.cssText = "position:fixed; top:8px; right:8px; width:12px;" +
+	    " height:12px; border-radius:50%; background:#bbb; z-index:2000;" +
+	    " box-shadow:0 0 4px rgba(0,0,0,0.4);";
+	  document.body.appendChild(dot);
+	  setInterval(function () {
+	    if (wsReady()) { dot.style.background = "#2ecc40"; dot.title = "Live (WebSocket)"; }
+	    else { dot.style.background = "#bbb"; dot.title = "Polling (no WebSocket)"; }
+	  }, 500);
+	})();
+
 	// <tile_width> is the width of one individual tile (tiles are square)
 	let tile_width = 32;
 	// Important: tile_width % movement_speed has to be 0. 
