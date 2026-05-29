@@ -280,14 +280,76 @@ def run_gpt_prompt_generate_hourly_schedule(persona,
   
   output = safe_generate_response(prompt, gpt_param, 5, fail_safe,
                                    __func_validate, __func_clean_up)
-  
-  if debug or verbose: 
-    print_run_prompts(prompt_template, persona, gpt_param, 
+
+  if debug or verbose:
+    print_run_prompts(prompt_template, persona, gpt_param,
                       prompt_input, prompt, output)
-    
+
   return output, [output, prompt, gpt_param, prompt_input, fail_safe]
 
 
+def run_gpt_prompt_generate_whole_day_hourly_schedule(persona,
+                                                      wake_up_hour,
+                                                      verbose=False):
+  """
+  One-shot replacement for the 24 sequential per-hour schedule calls. Asks the
+  model for the whole day's hourly activities in a single structured request.
+
+  INPUT:
+    persona: The Persona class instance.
+    wake_up_hour: integer hour (0-23) the persona wakes up.
+  OUTPUT:
+    A list of activity strings covering hours [wake_up_hour .. 23] (that is,
+    24 - wake_up_hour entries), or None on failure so the caller can fall back
+    to the per-hour generation path.
+  """
+  hour_str = ["00:00 AM", "01:00 AM", "02:00 AM", "03:00 AM", "04:00 AM",
+              "05:00 AM", "06:00 AM", "07:00 AM", "08:00 AM", "09:00 AM",
+              "10:00 AM", "11:00 AM", "12:00 PM", "01:00 PM", "02:00 PM",
+              "03:00 PM", "04:00 PM", "05:00 PM", "06:00 PM", "07:00 PM",
+              "08:00 PM", "09:00 PM", "10:00 PM", "11:00 PM"]
+
+  n_remaining = 24 - wake_up_hour
+  if n_remaining <= 0:
+    return []
+  target_hours = hour_str[wake_up_hour:]
+
+  name = persona.scratch.get_str_firstname()
+  iss = persona.scratch.get_str_iss()
+  date_str = persona.scratch.get_str_curr_date_str()
+  req_str = "; ".join(f"{i + 1}) {r}"
+                      for i, r in enumerate(persona.scratch.daily_req))
+
+  prompt = (
+      f"{iss}\n\n"
+      f"Today is {date_str}. Here is {name}'s broad plan for the day: "
+      f"{req_str}.\n\n"
+      f"{name} wakes up at {hour_str[wake_up_hour]}. In broad strokes, "
+      f"describe what {name} is doing during each of the following "
+      f"{n_remaining} hourly time slots today, in chronological order. Each "
+      f"activity should complete the sentence \"{name} is ...\" "
+      f"(for example \"eating breakfast\" or \"working on her painting\").\n"
+      f"Time slots: {', '.join(target_hours)}.\n\n"
+      f"Respond with ONLY a JSON array of exactly {n_remaining} short activity "
+      f"strings, in chronological order, and nothing else.\n"
+      f"Example: [\"waking up and completing her morning routine\", "
+      f"\"eating breakfast\", \"...\"]")
+
+  for _ in range(3):
+    try:
+      raw = generate_text(prompt, tier="cheap", max_tokens=700,
+                          temperature=0.5)
+      start = raw.find("[")
+      end = raw.rfind("]") + 1
+      arr = json.loads(raw[start:end])
+      arr = [str(a).strip().rstrip(".") for a in arr]
+      if len(arr) == n_remaining and all(arr):
+        if verbose:
+          print("whole-day schedule (one-shot):", arr)
+        return arr
+    except:
+      pass
+  return None
 
 
 

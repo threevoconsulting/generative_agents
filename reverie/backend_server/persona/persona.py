@@ -231,8 +231,28 @@ class Persona:
     return self.execute(maze, personas, plan)
 
 
-  def open_convo_session(self, convo_mode): 
+  def open_convo_session(self, convo_mode):
     open_convo_session(self, convo_mode)
+
+  def respond_to_player(self, maze, player_name, utterance, history):
+    """
+    Generate this agent's reply to a human player's utterance (play mode).
+
+    INPUT:
+      maze: the Maze instance.
+      player_name: the player's in-world name.
+      utterance: the player's latest line.
+      history: list of [speaker, text] for the conversation so far. The
+               player's latest line should already be appended.
+    OUTPUT:
+      the agent's reply string.
+    """
+    return generate_player_response(maze, self, player_name, utterance,
+                                    history)
+
+  def remember_player_conversation(self, player_name, history):
+    """Persist a finished player conversation into this agent's memory."""
+    store_player_conversation(self, player_name, history)
     
 
 

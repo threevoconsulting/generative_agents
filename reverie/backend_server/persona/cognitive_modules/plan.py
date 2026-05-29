@@ -89,25 +89,41 @@ def generate_hourly_schedule(persona, wake_up_hour):
   """
   if debug: print ("GNS FUNCTION: <generate_hourly_schedule>")
 
-  hour_str = ["00:00 AM", "01:00 AM", "02:00 AM", "03:00 AM", "04:00 AM", 
-              "05:00 AM", "06:00 AM", "07:00 AM", "08:00 AM", "09:00 AM", 
-              "10:00 AM", "11:00 AM", "12:00 PM", "01:00 PM", "02:00 PM", 
+  hour_str = ["00:00 AM", "01:00 AM", "02:00 AM", "03:00 AM", "04:00 AM",
+              "05:00 AM", "06:00 AM", "07:00 AM", "08:00 AM", "09:00 AM",
+              "10:00 AM", "11:00 AM", "12:00 PM", "01:00 PM", "02:00 PM",
               "03:00 PM", "04:00 PM", "05:00 PM", "06:00 PM", "07:00 PM",
               "08:00 PM", "09:00 PM", "10:00 PM", "11:00 PM"]
+
+  # Fast path: ask for the entire day's hourly activities in ONE structured
+  # call instead of 24 sequential ones. Hours before wake-up are sleeping.
   n_m1_activity = []
-  diversity_repeat_count = 3
-  for i in range(diversity_repeat_count): 
-    n_m1_activity_set = set(n_m1_activity)
-    if len(n_m1_activity_set) < 5: 
-      n_m1_activity = []
-      for count, curr_hour_str in enumerate(hour_str): 
-        if wake_up_hour > 0: 
-          n_m1_activity += ["sleeping"]
-          wake_up_hour -= 1
-        else: 
-          n_m1_activity += [run_gpt_prompt_generate_hourly_schedule(
-                          persona, curr_hour_str, n_m1_activity, hour_str)[0]]
-  
+  try:
+    whole_day = run_gpt_prompt_generate_whole_day_hourly_schedule(
+                    persona, wake_up_hour)
+    if whole_day is not None and len(whole_day) == 24 - wake_up_hour:
+      n_m1_activity = ["sleeping"] * wake_up_hour + whole_day
+  except:
+    n_m1_activity = []
+
+  # Fallback: original per-hour generation (also runs if the one-shot output
+  # was malformed or insufficiently diverse).
+  if len(n_m1_activity) != 24 or len(set(n_m1_activity)) < 5:
+    n_m1_activity = []
+    diversity_repeat_count = 3
+    for i in range(diversity_repeat_count):
+      n_m1_activity_set = set(n_m1_activity)
+      if len(n_m1_activity_set) < 5:
+        n_m1_activity = []
+        wake_up_hour_countdown = wake_up_hour
+        for count, curr_hour_str in enumerate(hour_str):
+          if wake_up_hour_countdown > 0:
+            n_m1_activity += ["sleeping"]
+            wake_up_hour_countdown -= 1
+          else:
+            n_m1_activity += [run_gpt_prompt_generate_hourly_schedule(
+                            persona, curr_hour_str, n_m1_activity, hour_str)[0]]
+
   # Step 1. Compressing the hourly schedule to the following format: 
   # The integer indicates the number of hours. They should add up to 24. 
   # [['sleeping', 6], ['waking up and starting her morning routine', 1], 

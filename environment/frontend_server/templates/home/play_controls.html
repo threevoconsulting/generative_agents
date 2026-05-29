@@ -1,0 +1,150 @@
+{% load staticfiles %}
+
+<!-- ==========================================================================
+     PLAY MODE CONTROLS
+     A simple chat panel that lets the human player talk to whichever agent
+     they are standing near. Player<->agent chat is routed to the backend
+     through Django (player_chat / player_chat_response) and serviced by the
+     reverie run loop, so a simulation must be actively running ("run <N>")
+     for agents to reply.
+     This script runs after main_script.html and relies on the globals it
+     declares (player, personas, sim_code, player_name, tile_width).
+=========================================================================== -->
+
+<div id="player-chat-panel" style="position:fixed; right:1em; bottom:1em;
+     width:23em; background:#ffffff; border:2px solid #333; border-radius:10px;
+     padding:0.8em; font-family:monospace; z-index:1000; box-shadow:0 4px 14px rgba(0,0,0,0.25);">
+  <div style="font-weight:bold; margin-bottom:0.4em;">
+    🗣️ Talking to: <span id="chat-target" style="color:#1a6">(walk up to someone)</span>
+  </div>
+  <div id="chat-transcript" style="height:11em; overflow-y:auto;
+       background:#f4f4f4; padding:0.5em; border-radius:6px; font-size:0.85em;
+       line-height:1.35em;"></div>
+  <div style="margin-top:0.5em; display:flex; gap:0.3em;">
+    <input id="chat-input" type="text" placeholder="Say something..."
+           style="flex:1; padding:0.3em;">
+    <button id="chat-send" class="btn btn-default btn-sm">Send</button>
+    <button id="chat-end" class="btn btn-default btn-sm" title="End the conversation">End</button>
+  </div>
+  <div id="chat-status" style="font-size:0.75em; color:#888; margin-top:0.3em; min-height:1em;"></div>
+  <div style="font-size:0.72em; color:#aaa; margin-top:0.3em;">
+    Move with arrow keys. Walk near a resident, then chat. (Requires a running
+    simulation.)
+  </div>
+</div>
+
+<script type="text/javascript">
+(function () {
+  // How close (in px) the player must be to an agent to start a conversation.
+  const TALK_RADIUS = 2.5 * tile_width;
+
+  let chat_history = [];      // authoritative [speaker, text] list from backend
+  let chat_target = null;     // nearest agent in range
+  let locked_target = null;   // agent locked once a conversation begins
+  let awaiting = false;       // waiting on a backend reply
+
+  const $target = document.getElementById("chat-target");
+  const $transcript = document.getElementById("chat-transcript");
+  const $input = document.getElementById("chat-input");
+  const $status = document.getElementById("chat-status");
+
+  function nearestPersona() {
+    let best = null, bestd = Infinity;
+    for (let key in personas) {
+      let s = personas[key];
+      let dx = s.body.x - player.body.x;
+      let dy = s.body.y - player.body.y;
+      let d = Math.sqrt(dx * dx + dy * dy);
+      if (d < bestd) { bestd = d; best = key; }
+    }
+    return [best, bestd];
+  }
+
+  // Keep the "Talking to" label in sync with the nearest agent (unless a
+  // conversation is already locked onto someone).
+  setInterval(function () {
+    if (locked_target) { $target.innerText = locked_target + " (in conversation)"; return; }
+    let [name, d] = nearestPersona();
+    if (name && d <= TALK_RADIUS) {
+      chat_target = name;
+      $target.innerText = name;
+    } else {
+      chat_target = null;
+      $target.innerText = "(walk up to someone)";
+    }
+  }, 400);
+
+  function appendLine(speaker, text) {
+    let div = document.createElement("div");
+    div.innerHTML = "<strong>" + speaker + ":</strong> " + text;
+    $transcript.appendChild(div);
+    $transcript.scrollTop = $transcript.scrollHeight;
+  }
+
+  function pollResponse() {
+    let xhr = new XMLHttpRequest();
+    xhr.open("POST", "{% url 'player_chat_response' %}", true);
+    xhr.overrideMimeType("application/json");
+    xhr.addEventListener("load", function () {
+      if (xhr.status !== 200) { awaiting = false; return; }
+      let r = JSON.parse(xhr.responseText);
+      if (r.ready) {
+        chat_history = r.history;
+        appendLine(r.target, r.reply);
+        awaiting = false;
+        $status.innerText = "";
+      } else {
+        setTimeout(pollResponse, 600);
+      }
+    });
+    xhr.send(JSON.stringify({ "sim_code": sim_code }));
+  }
+
+  function sendMessage(end) {
+    let text = $input.value.trim();
+    let target = locked_target || chat_target;
+    if (!target) {
+      $status.innerText = "No one nearby to talk to.";
+      return;
+    }
+    if (awaiting) return;
+    locked_target = target;  // lock onto this agent for the conversation
+
+    if (text) {
+      appendLine(player_name, text);   // display only; backend appends to history
+    }
+
+    // Fire the request to the backend.
+    let xhr = new XMLHttpRequest();
+    xhr.open("POST", "{% url 'player_chat' %}", true);
+    xhr.overrideMimeType("application/json");
+    xhr.send(JSON.stringify({
+      "sim_code": sim_code,
+      "target": target,
+      "player_name": player_name,
+      "utterance": text,
+      "history": chat_history,
+      "end": !!end
+    }));
+    $input.value = "";
+
+    if (end) {
+      appendLine("—", "(conversation ended)");
+      locked_target = null;
+      chat_history = [];
+      awaiting = false;
+      $status.innerText = "";
+    } else {
+      awaiting = true;
+      $status.innerText = target + " is thinking...";
+      pollResponse();
+    }
+  }
+
+  document.getElementById("chat-send").onclick = function () { sendMessage(false); };
+  document.getElementById("chat-end").onclick = function () { sendMessage(true); };
+  $input.addEventListener("keydown", function (e) {
+    if (e.key === "Enter") sendMessage(false);
+  });
+})();
+</script>

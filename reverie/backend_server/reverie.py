@@ -132,9 +132,20 @@ class ReverieServer:
       self.maze.tiles[p_y][p_x]["events"].add(curr_persona.scratch
                                               .get_curr_event_and_desc())
 
-    # REVERIE SETTINGS PARAMETERS:  
+    # PLAYER MODE STATE:
+    # In "play" mode the frontend controls a human player avatar that lives in
+    # the town. The player is projected into the maze each step so agents can
+    # perceive (and converse with) them, but the player is NEVER part of
+    # self.personas and is never given cognition. These track the player's last
+    # known tile so we can clear their stale event before re-stamping it.
+    # In pure simulation mode the frontend simply never sends a "Player" entry
+    # and none of this activates.
+    self.player_name = None
+    self.player_prev_tile = None
+
+    # REVERIE SETTINGS PARAMETERS:
     # <server_sleep> denotes the amount of time that our while loop rests each
-    # cycle; this is to not kill our machine. 
+    # cycle; this is to not kill our machine.
     self.server_sleep = 0.1
 
     # SIGNALING THE FRONTEND SERVER: 
@@ -276,7 +287,69 @@ class ReverieServer:
       time.sleep(self.server_sleep * 10)
 
 
-  def start_server(self, int_counter): 
+  def _handle_player_chat(self, sim_folder):
+    """
+    Handle a pending player->agent chat request (play mode only).
+
+    The frontend (via Django) drops a player_chat.json request into the sim
+    folder when the human player speaks to an agent. We generate the addressed
+    agent's reply and write player_chat_response.json for the frontend to pick
+    up. If the request marks the end of the conversation, the agent commits the
+    exchange to memory so it remembers having spoken with the player.
+
+    This is checked every loop cycle during a run, so it is responsive without
+    requiring the simulation to advance a step.
+    """
+    chat_req_file = f"{sim_folder}/player_chat.json"
+    if not check_if_file_exists(chat_req_file):
+      return
+    try:
+      with open(chat_req_file) as f:
+        req = json.load(f)
+      os.remove(chat_req_file)
+    except:
+      return
+
+    target = req.get("target", "")
+    player_name = req.get("player_name", "Player")
+    utterance = req.get("utterance", "")
+    history = req.get("history", [])
+    if target not in self.personas:
+      return
+    persona = self.personas[target]
+
+    # An "end" with no utterance just closes the conversation: let the agent
+    # commit it to memory so it remembers having spoken with the player.
+    if not utterance:
+      if req.get("end"):
+        try:
+          persona.remember_player_conversation(player_name, history)
+        except:
+          traceback.print_exc()
+      return
+
+    history = history + [[player_name, utterance]]
+    try:
+      reply = persona.respond_to_player(self.maze, player_name, utterance,
+                                        history)
+    except:
+      traceback.print_exc()
+      reply = "..."
+    history = history + [[target, reply]]
+
+    resp = {"target": target, "player_name": player_name,
+            "reply": reply, "history": history}
+    with open(f"{sim_folder}/player_chat_response.json", "w") as outfile:
+      outfile.write(json.dumps(resp, indent=2))
+
+    if req.get("end"):
+      try:
+        persona.remember_player_conversation(player_name, history)
+      except:
+        traceback.print_exc()
+
+
+  def start_server(self, int_counter):
     """
     The main backend server of Reverie. 
     This function retrieves the environment file from the frontend to 
@@ -304,9 +377,13 @@ class ReverieServer:
 
     # The main while loop of Reverie. 
     while (True): 
-      # Done with this iteration if <int_counter> reaches 0. 
-      if int_counter == 0: 
+      # Done with this iteration if <int_counter> reaches 0.
+      if int_counter == 0:
         break
+
+      # PLAYER MODE: service any pending player->agent chat each cycle. This is
+      # a no-op (single cheap file existence check) in pure simulation mode.
+      self._handle_player_chat(sim_folder)
 
       # <curr_env_file> file is the file that our frontend outputs. When the
       # frontend has done its job and moved the personas, then it will put a 
@@ -364,10 +441,26 @@ class ReverieServer:
                        None, None, None)
               self.maze.remove_event_from_tile(blank, new_tile)
 
+          # PLAYER MODE: project the human player onto the maze so that agents
+          # perceive them as a fellow resident. The player is controlled
+          # entirely by the frontend and is never part of self.personas, so we
+          # only stamp/clear their event here and never call move() on them.
+          if "Player" in new_env:
+            player = new_env["Player"]
+            self.player_name = player.get("name", "Player")
+            new_player_tile = (player["x"], player["y"])
+            player_desc = player.get("description", "exploring the town")
+            player_event = (self.player_name, "is", player_desc, player_desc)
+            if self.player_prev_tile is not None:
+              self.maze.remove_subject_events_from_tile(
+                  self.player_name, self.player_prev_tile)
+            self.maze.add_event_from_tile(player_event, new_player_tile)
+            self.player_prev_tile = new_player_tile
+
           # Then we need to actually have each of the personas perceive and
           # move. The movement for each of the personas comes in the form of
           # x y coordinates where the persona will move towards. e.g., (50, 34)
-          # This is where the core brains of the personas are invoked. 
+          # This is where the core brains of the personas are invoked.
           movements = {"persona": dict(), 
                        "meta": dict()}
           for persona_name, persona in self.personas.items(): 

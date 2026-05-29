@@ -101,6 +101,15 @@
 
 	let curr_maze = "the_ville";
 
+	// *** PLAY MODE ***
+	// In "play" mode the <player> sprite becomes a visible, collidable, human-
+	// controlled resident whose tile position is reported to the backend so the
+	// agents perceive (and can converse with) them. In every other mode the
+	// <player> sprite is just the invisible camera anchor it has always been.
+	let PLAY_MODE = {% if mode == "play" %}true{% else %}false{% endif %};
+	let player_name = "{{ player_name|default:'You'|escapejs }}";
+	let player_spawn_tile = [{{ player_init_x|default:72 }}, {{ player_init_y|default:14 }}];
+
 	// <tile_width> is the width of one individual tile (tiles are square)
 	let tile_width = 32;
 	// Important: tile_width % movement_speed has to be 0. 
@@ -265,12 +274,22 @@
 	  // OLD NOTE: Create a sprite with physics enabled via the physics system. 
 	  // The image  used for the sprite has a bit of whitespace, so I'm using 
 	  // setSize & setOffset to control the size of the player's body.
+	  // In play mode spawn the player on a known-walkable tile and make them a
+	  // visible, collidable character; otherwise keep the historic invisible
+	  // camera-anchor behaviour (depth -1, passes through collisions).
+	  let player_start_x = PLAY_MODE ? player_spawn_tile[0] * tile_width + tile_width / 2 : 800;
+	  let player_start_y = PLAY_MODE ? player_spawn_tile[1] * tile_width + tile_width : 288;
 	  player = this.physics.add.
-	                sprite(800, 288, "atlas", "misa-front").
+	                sprite(player_start_x, player_start_y, "atlas", "misa-front").
 	                setSize(30, 40).
 	                setOffset(0, 0);
-	  player.setDepth(-1);
-	  // Setting up the camera. 
+	  if (PLAY_MODE) {
+	    player.setDepth(1);
+	    this.physics.add.collider(player, collisionsLayer);
+	  } else {
+	    player.setDepth(-1);
+	  }
+	  // Setting up the camera.
 	  const camera = this.cameras.main;
 	  camera.startFollow(player);
 	  camera.setBounds(0, 0, map.widthInPixels, map.heightInPixels);
@@ -349,20 +368,34 @@
 	  // This is where we finish up the camera setting we started in the create() 
 	  // function. We set the movement speed of the camera and wire up the keys to
 	  // map to the actual movement.
-	  const camera_speed = 400;
+	  // Walking pace in play mode, faster free-fly pan otherwise.
+	  const camera_speed = PLAY_MODE ? 160 : 400;
 	  // Stop any previous movement from the last frame
 	  player.body.setVelocity(0);
+	  let player_move_dir = "";
 	  if (cursors.left.isDown) {
 	    player.body.setVelocityX(-camera_speed);
-	  } 
+	    player_move_dir = "l";
+	  }
 	  if (cursors.right.isDown) {
 	    player.body.setVelocityX(camera_speed);
-	  } 
+	    player_move_dir = "r";
+	  }
 	  if (cursors.up.isDown) {
 	    player.body.setVelocityY(-camera_speed);
-	  } 
+	    player_move_dir = "u";
+	  }
 	  if (cursors.down.isDown) {
 	    player.body.setVelocityY(camera_speed);
+	    player_move_dir = "d";
+	  }
+	  // Animate the player's avatar in play mode.
+	  if (PLAY_MODE) {
+	    if (player_move_dir == "l") player.anims.play("misa-left-walk", true);
+	    else if (player_move_dir == "r") player.anims.play("misa-right-walk", true);
+	    else if (player_move_dir == "u") player.anims.play("misa-back-walk", true);
+	    else if (player_move_dir == "d") player.anims.play("misa-front-walk", true);
+	    else player.anims.stop();
 	  }
 
 	  // console.log("phase: " + phase + ", step: " + step);
@@ -382,6 +415,16 @@
 	      data["environment"][persona_name] = {"maze": curr_maze,
 	                                           "x": Math.ceil((personas[persona_name].body.position.x) / tile_width),
 	                                           "y": Math.ceil((personas[persona_name].body.position.y) / tile_width)}
+	    }
+	    // In play mode, report the human player so the backend projects them
+	    // into the world for the agents to perceive.
+	    if (PLAY_MODE) {
+	      data["environment"]["Player"] = {
+	        "maze": curr_maze,
+	        "x": Math.ceil((player.body.position.x) / tile_width),
+	        "y": Math.ceil((player.body.position.y) / tile_width),
+	        "name": player_name,
+	        "description": "walking around the town"};
 	    }
 	    var json = JSON.stringify(data);
 	    // We then send this to the frontend server: 
