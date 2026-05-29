@@ -14,10 +14,20 @@ To set up your environment, you will need to generate a `utils.py` file that con
 ### Step 1. Generate Utils File
 In the `reverie/backend_server` folder (where `reverie.py` is located), create a new file titled `utils.py` and copy and paste the content below into the file:
 ```
-# Copy and paste your OpenAI API Key
-openai_api_key = "<Your OpenAI API>"
 # Put your name
 key_owner = "<Name>"
+
+# --- LLM / embedding provider configuration ---------------------------------
+# By default the simulation uses Anthropic's Claude for text generation and a
+# local sentence-transformers model for embeddings (no embedding API cost).
+# Provide your Anthropic API key here (or set the ANTHROPIC_API_KEY env var):
+anthropic_api_key = "<Your Anthropic API Key>"
+
+# To use OpenAI instead, set the following and provide an OpenAI key:
+#   llm_provider = "openai"        # default: "claude"
+#   embedding_backend = "openai"   # default: "local"
+#   openai_api_key = "<Your OpenAI API Key>"
+# ----------------------------------------------------------------------------
 
 maze_assets_loc = "../../environment/frontend_server/static_dirs/assets"
 env_matrix = f"{maze_assets_loc}/the_ville/matrix"
@@ -31,7 +41,22 @@ collision_block_id = "32125"
 # Verbose 
 debug = True
 ```
-Replace `<Your OpenAI API>` with your OpenAI API key, and `<name>` with your name.
+Replace `<Your Anthropic API Key>` with your Anthropic API key, and `<name>` with your name.
+
+#### Choosing models and providers
+All LLM and embedding calls funnel through `reverie/backend_server/llm_provider.py`. Configuration is resolved with the precedence **environment variable > `utils.py` attribute > built-in default**, so you can override anything without editing code. The main knobs (with their defaults) are:
+
+| Setting | Default | Purpose |
+| --- | --- | --- |
+| `LLM_PROVIDER` | `claude` | Text provider: `claude` or `openai` |
+| `EMBEDDING_BACKEND` | `local` | Embeddings: `local` (sentence-transformers) or `openai` |
+| `CLAUDE_MODEL_CHEAP` | `claude-haiku-4-5-20251001` | High-frequency calls (perception, planning, action resolution) |
+| `CLAUDE_MODEL_STRONG` | `claude-sonnet-4-6` | Conversation and reflection |
+| `LOCAL_EMBED_MODEL` | `all-MiniLM-L6-v2` | Local embedding model |
+
+The cognitive loop makes many low-judgment calls per step and only a few that benefit from a stronger model, so the cheap/strong tiering keeps cost down while preserving conversation quality.
+
+> **Embedding compatibility note:** different embedding backends produce vectors of different dimensionality. It is only safe to *resume* a saved simulation with the same `EMBEDDING_BACKEND` it was created under. Base simulations ship with empty embedding stores, so starting a fresh simulation is always safe.
  
 ### Step 2. Install requirements.txt
 Install everything listed in the `requirements.txt` file (I strongly recommend first setting up a virtualenv as usual). A note on Python version: we tested our environment on Python 3.9.12. 
