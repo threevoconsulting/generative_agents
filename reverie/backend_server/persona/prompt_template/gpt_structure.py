@@ -14,6 +14,7 @@ Tiering: low-judgment, high-frequency calls use the "cheap" tier; the GPT-4
 entry points map to the "strong" tier.
 """
 import json
+import re
 import time
 
 from llm_provider import generate_text, embed, ERROR_SENTINEL
@@ -63,6 +64,66 @@ def ChatGPT_request(prompt):
     return ERROR_SENTINEL
 
 
+def _extract_json_output(raw):
+  """Best-effort pull of the 'output' value from a model reply that is supposed
+  to be JSON like {"output": "..."}. Tolerates ``` code fences, surrounding
+  prose, and single quotes; falls back to the raw de-fenced text when there is
+  no parseable JSON (these prompts often make the model just return the bare
+  phrase). Returns a string, or None if nothing usable came back."""
+  if not raw or raw == ERROR_SENTINEL:
+    return None
+  s = raw.strip()
+  if s.startswith("```"):                         # strip ``` / ```json fences
+    s = re.sub(r"^```[a-zA-Z]*\s*", "", s)
+    s = re.sub(r"\s*```$", "", s).strip()
+  for m in re.finditer(r"\{.*?\}", s, re.DOTALL):  # find a JSON obj w/ "output"
+    chunk = m.group(0)
+    for candidate in (chunk, chunk.replace("'", '"')):
+      try:
+        obj = json.loads(candidate)
+        if isinstance(obj, dict) and "output" in obj:
+          return str(obj["output"])
+      except Exception:
+        pass
+  s = s.strip().strip('"').strip("'").strip()      # fall back to bare text
+  return s or None
+
+
+def _json_safe_generate(prompt, example_output, special_instruction, tier,
+                        repeat, fail_safe_response, func_validate, func_clean_up,
+                        verbose):
+  """Shared core for the JSON-wrapped prompt helpers. Unlike the original, this
+  NEVER returns False/None: the ~16 callers do `if output != False: return
+  output` with no real fallback, so returning False made them return None and
+  crash downstream (e.g. 'NoneType' object is not subscriptable). On repeated
+  failure we degrade to <fail_safe_response>."""
+  wrapped = ('"""\n' + prompt + '\n"""\n'
+             + f"Output the response to the prompt above in json. "
+             + f"{special_instruction}\n"
+             + "Example output json:\n"
+             + '{"output": "' + str(example_output) + '"}')
+  if verbose:
+    print("LLM PROMPT")
+    print(wrapped)
+
+  for i in range(repeat):
+    # temperature=0 -> deterministic and far more reliably parseable than the
+    # previous default (0.7), which made these structured calls flaky.
+    extracted = _extract_json_output(generate_text(wrapped, tier=tier,
+                                                   temperature=0))
+    if extracted is None:
+      continue
+    try:
+      if func_validate(extracted, prompt=wrapped):
+        return func_clean_up(extracted, prompt=wrapped)
+    except Exception:
+      pass
+    if verbose:
+      print("---- repeat count:", i, extracted)
+
+  return fail_safe_response
+
+
 def GPT4_safe_generate_response(prompt,
                                    example_output,
                                    special_instruction,
@@ -71,35 +132,9 @@ def GPT4_safe_generate_response(prompt,
                                    func_validate=None,
                                    func_clean_up=None,
                                    verbose=False):
-  prompt = 'GPT-3 Prompt:\n"""\n' + prompt + '\n"""\n'
-  prompt += f"Output the response to the prompt above in json. {special_instruction}\n"
-  prompt += "Example output json:\n"
-  prompt += '{"output": "' + str(example_output) + '"}'
-
-  if verbose:
-    print("LLM PROMPT")
-    print(prompt)
-
-  for i in range(repeat):
-
-    try:
-      curr_gpt_response = GPT4_request(prompt).strip()
-      end_index = curr_gpt_response.rfind('}') + 1
-      curr_gpt_response = curr_gpt_response[:end_index]
-      curr_gpt_response = json.loads(curr_gpt_response)["output"]
-
-      if func_validate(curr_gpt_response, prompt=prompt):
-        return func_clean_up(curr_gpt_response, prompt=prompt)
-
-      if verbose:
-        print("---- repeat count: \n", i, curr_gpt_response)
-        print(curr_gpt_response)
-        print("~~~~")
-
-    except:
-      pass
-
-  return False
+  return _json_safe_generate(prompt, example_output, special_instruction,
+                             "strong", repeat, fail_safe_response,
+                             func_validate, func_clean_up, verbose)
 
 
 def ChatGPT_safe_generate_response(prompt,
@@ -110,35 +145,9 @@ def ChatGPT_safe_generate_response(prompt,
                                    func_validate=None,
                                    func_clean_up=None,
                                    verbose=False):
-  prompt = '"""\n' + prompt + '\n"""\n'
-  prompt += f"Output the response to the prompt above in json. {special_instruction}\n"
-  prompt += "Example output json:\n"
-  prompt += '{"output": "' + str(example_output) + '"}'
-
-  if verbose:
-    print("LLM PROMPT")
-    print(prompt)
-
-  for i in range(repeat):
-
-    try:
-      curr_gpt_response = ChatGPT_request(prompt).strip()
-      end_index = curr_gpt_response.rfind('}') + 1
-      curr_gpt_response = curr_gpt_response[:end_index]
-      curr_gpt_response = json.loads(curr_gpt_response)["output"]
-
-      if func_validate(curr_gpt_response, prompt=prompt):
-        return func_clean_up(curr_gpt_response, prompt=prompt)
-
-      if verbose:
-        print("---- repeat count: \n", i, curr_gpt_response)
-        print(curr_gpt_response)
-        print("~~~~")
-
-    except:
-      pass
-
-  return False
+  return _json_safe_generate(prompt, example_output, special_instruction,
+                             "cheap", repeat, fail_safe_response,
+                             func_validate, func_clean_up, verbose)
 
 
 def ChatGPT_safe_generate_response_OLD(prompt,
