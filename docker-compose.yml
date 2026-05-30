@@ -25,6 +25,10 @@ services:
   generative-agents:
     image: ${GA_IMAGE:-generative-agents:latest}
     container_name: generative-agents
+    # The image is built for amd64 (the Intel DS220+). Pinning the platform here
+    # is native on the NAS and runs under emulation on an Apple Silicon Mac --
+    # which silences the "platform does not match host" warning locally.
+    platform: linux/amd64
     pull_policy: never
     ports:
       - "8000:8000"
