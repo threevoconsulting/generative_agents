@@ -114,10 +114,15 @@ def home(request):
   with open(f_curr_sim_code) as json_file:  
     sim_code = json.load(json_file)["sim_code"]
   
-  with open(f_curr_step) as json_file:  
+  with open(f_curr_step) as json_file:
     step = json.load(json_file)["step"]
 
-  os.remove(f_curr_step)
+  # NOTE: we intentionally do NOT delete curr_step.json here. The original code
+  # treated it as a single-use token, so reloading /simulator_home (or opening
+  # it a moment too late) showed "Please start the backend first" and the game
+  # loop never started -- leaving the backend blocked forever waiting for the
+  # frontend. Keeping the file lets the page be (re)loaded any time the backend
+  # is running.
 
   persona_names = []
   persona_names_set = set()
