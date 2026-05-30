@@ -57,6 +57,11 @@ class ReverieServer:
     sim_folder = f"{fs_storage}/{self.sim_code}"
     copyanything(fork_folder, sim_folder)
 
+    # The base simulations ship with an environment/ but no movement/ folder
+    # (git does not track empty directories), so ensure it exists before the
+    # step loop tries to write movement/<step>.json.
+    os.makedirs(f"{sim_folder}/movement", exist_ok=True)
+
     with open(f"{sim_folder}/reverie/meta.json") as json_file:  
       reverie_meta = json.load(json_file)
 
@@ -491,7 +496,8 @@ class ReverieServer:
           #  "persona": {"Klaus Mueller": {"movement": [38, 12]}}, 
           #  "meta": {curr_time: <datetime>}}
           curr_move_file = f"{sim_folder}/movement/{self.step}.json"
-          with open(curr_move_file, "w") as outfile: 
+          os.makedirs(os.path.dirname(curr_move_file), exist_ok=True)
+          with open(curr_move_file, "w") as outfile:
             outfile.write(json.dumps(movements, indent=2))
 
           # After this cycle, the world takes one step forward, and the 
