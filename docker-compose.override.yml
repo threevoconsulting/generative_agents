@@ -1,0 +1,12 @@
+# LOCAL DEV ONLY -- Docker Compose automatically merges this file on top of
+# docker-compose.yml when you run `docker compose` in this directory.
+#
+# It bind-mounts the backend source into the container so code changes (e.g.
+# after `git pull`) take effect by just restarting reverie.py -- no image
+# rebuild needed. This file is NOT used on the NAS (there you paste only
+# docker-compose.yml into Portainer), so it never affects the deployment.
+
+services:
+  generative-agents:
+    volumes:
+      - ./reverie:/app/reverie
