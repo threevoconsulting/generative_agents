@@ -5,6 +5,11 @@
 # after `git pull`) take effect by just restarting reverie.py -- no image
 # rebuild needed. This file is NOT used on the NAS (there you paste only
 # docker-compose.yml into Portainer), so it never affects the deployment.
+#
+# PREREQUISITE: mounting ./reverie hides the utils.py that the Dockerfile
+# generates at build time, so create it once in your clone (it is gitignored):
+#
+#   cp reverie/backend_server/utils.docker.py reverie/backend_server/utils.py
 
 services:
   generative-agents:
