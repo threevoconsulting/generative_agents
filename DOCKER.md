@@ -57,8 +57,8 @@ embeddings, has poor ARM wheel support.)
   OpenAI instead, set `LLM_PROVIDER=openai`, `EMBEDDING_BACKEND=openai`, and
   `OPENAI_API_KEY` in the stack env.
 - **If the image build fails on a dependency**, the likely culprit is the
-  Django add-on version range in `requirements.docker.txt`; pinning
-  `django-cors-headers==2.5.3` and `django-storages-redux==1.3.3` (the
+  Django add-on version range in `environment/frontend_server/requirements.txt`;
+  pinning `django-cors-headers==2.5.3` and `django-storages-redux==1.3.3` (the
   repo's original pins) is the documented fallback.
 - **Image size:** PyTorch makes the image large (multi-GB). Switching to
   `EMBEDDING_BACKEND=openai` removes PyTorch entirely if you want a small image.

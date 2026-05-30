@@ -12,9 +12,11 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-# Install runtime dependencies first for better layer caching.
-COPY requirements.docker.txt ./
-RUN pip install -r requirements.docker.txt
+# Install runtime dependencies first for better layer caching. These are the
+# pruned backend + environment-server requirements (analysis-only libs removed).
+COPY requirements.txt ./requirements.txt
+COPY environment/frontend_server/requirements.txt ./frontend-requirements.txt
+RUN pip install -r requirements.txt -r frontend-requirements.txt
 
 # Copy the application code.
 COPY . .
