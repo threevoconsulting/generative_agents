@@ -14,16 +14,25 @@ embeddings, has poor ARM wheel support.)
 - An **Anthropic API key** (Claude). The NAS needs outbound internet to
   `api.anthropic.com`.
 - Docker / Container Manager + Portainer on the NAS.
-- A PC with Docker to build the image (no registry / Docker Hub needed).
+- A Mac or PC with Docker to build the image (no registry / Docker Hub needed).
 
-## Step 1 — Build the image on your PC and export it to a file
-The image is large because of PyTorch, so build it on a real machine rather than
-on the DS220+. In the repo root:
+## Step 1 — Build the image (for the NAS's architecture) and export it
+The image is large because of PyTorch, so build it on your Mac/PC rather than on
+the DS220+. The DS220+ is **Intel/amd64**, so build for that platform — this
+matters if you build on an **Apple Silicon Mac** (otherwise you'd get an arm64
+image that fails on the NAS with "exec format error"). In the repo root:
 ```bash
-docker build -t generative-agents:latest .
+docker build --platform linux/amd64 -t generative-agents:latest .
 docker save  -o generative-agents.tar generative-agents:latest
 ```
-This produces `generative-agents.tar` (a few GB).
+This produces `generative-agents.tar` (a few GB). The `--platform` flag is
+harmless on an Intel Mac/PC (already amd64).
+
+> **Test it locally first (optional but recommended).** Run the same image on
+> your machine before exporting: `export ANTHROPIC_API_KEY=sk-ant-...` then
+> `docker compose up -d` and open <http://localhost:8000/simulator_home>. On
+> Apple Silicon this runs under emulation (slower), but it verifies the image
+> works *as it will on the NAS*.
 
 ## Step 2 — Import the image into Portainer
 1. Copy `generative-agents.tar` to a place the NAS can reach (e.g. a shared

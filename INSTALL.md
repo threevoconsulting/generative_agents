@@ -116,8 +116,9 @@ The image is **built on your PC and imported into Portainer** (no registry / no
 PyTorch compile on the NAS). Full walkthrough in **`DOCKER.md`**; in brief:
 
 ```bash
-# 1) On your PC, in the repo root: build the image and export it to a file
-docker build -t generative-agents:latest .
+# 1) On your Mac/PC, in the repo root: build the image (for the NAS = amd64)
+#    and export it to a file. The --platform flag matters on Apple Silicon.
+docker build --platform linux/amd64 -t generative-agents:latest .
 docker save  -o generative-agents.tar generative-agents:latest
 
 # 2) In Portainer: Images -> Import -> upload generative-agents.tar
