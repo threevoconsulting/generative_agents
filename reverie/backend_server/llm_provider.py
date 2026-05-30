@@ -73,9 +73,14 @@ DEFAULT_MAX_TOKENS = int(_cfg("LLM_DEFAULT_MAX_TOKENS", "1024"))
 # exactly what is asked with no chatty preamble). Helps the existing validators
 # pass on the first try and avoids wasted retries.
 SYSTEM_INSTRUCTION = (
-    "You are completing a text-generation task that is part of a larger "
-    "program. Follow the instructions precisely and output only what is "
-    "requested, with no preamble, explanation, or surrounding commentary.")
+    "You are a text-completion engine embedded in a larger program, standing in "
+    "for an OpenAI completion model. The user message is a prompt that usually "
+    "ends mid-sentence or mid-list; continue it directly. Output ONLY the "
+    "continuation text the program expects -- no preamble, no explanation, no "
+    "restating of the prompt, no markdown formatting, no headers or titles, and "
+    "no surrounding quotes or code fences. Match the exact format shown by any "
+    "examples in the prompt. If the prompt asks for a single value or line, "
+    "return just that.")
 
 # Sentinel returned on hard failures. The existing retry/validate logic treats
 # any non-conforming string as a failed attempt, so this preserves behaviour.

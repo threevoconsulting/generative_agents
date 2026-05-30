@@ -419,29 +419,33 @@ def run_gpt_prompt_task_decomp(persona,
     return prompt_input
 
   def __func_clean_up(gpt_response, prompt=""):
-    print ("TOODOOOOOO")
-    print (gpt_response)
-    print ("-==- -==- -==- ")
-
-    # TODO SOMETHING HERE sometimes fails... See screenshot
-    temp = [i.strip() for i in gpt_response.split("\n")]
-    _cr = []
+    # Parse lines of the form:
+    #   "1) Isabella is doing X. (duration in minutes: 5, minutes left: 55)"
+    # Robust to chat-model output: skip header/blank/garbage lines, and strip a
+    # leading "N) <name> is" marker when present (the original completion prompt
+    # ended mid-sentence so davinci omitted that prefix on the first item).
     cr = []
-    for count, i in enumerate(temp): 
-      if count != 0: 
-        _cr += [" ".join([j.strip () for j in i.split(" ")][3:])]
-      else: 
-        _cr += [i]
-    for count, i in enumerate(_cr): 
-      k = [j.strip() for j in i.split("(duration in minutes:")]
+    for line in gpt_response.split("\n"):
+      line = line.strip()
+      if "(duration in minutes:" not in line:
+        continue
+      k = [j.strip() for j in line.split("(duration in minutes:")]
       task = k[0]
-      if task[-1] == ".": 
+      if re.match(r"^\d+[\).]", task):          # numbered item -> drop "N) <name> is"
+        task = " ".join(task.split(" ")[3:]).strip()
+      if task and task[-1] == ".":
         task = task[:-1]
-      duration = int(k[1].split(",")[0].strip())
-      cr += [[task, duration]]
+      try:
+        duration = int(re.search(r"\d+", k[1]).group())
+      except (AttributeError, IndexError, ValueError):
+        continue
+      cr += [[task.strip(), duration]]
 
     total_expected_min = int(prompt.split("(total duration in minutes")[-1]
                                    .split("):")[0].strip())
+
+    if not cr:                                  # nothing parsed -> one block
+      cr = [["idle", total_expected_min]]
     
     # TODO -- now, you need to make sure that this is the same as the sum of 
     #         the current action sequence. 
@@ -454,9 +458,12 @@ def run_gpt_prompt_task_decomp(persona,
       if i_duration > 0: 
         for j in range(i_duration): 
           curr_min_slot += [(i_task, count)]       
-    curr_min_slot = curr_min_slot[1:]   
+    curr_min_slot = curr_min_slot[1:]
 
-    if len(curr_min_slot) > total_expected_min: 
+    if not curr_min_slot:                       # all durations rounded to 0
+      curr_min_slot = [(cr[0][0], 0)]
+
+    if len(curr_min_slot) > total_expected_min:
       last_task = curr_min_slot[60]
       for i in range(1, 6): 
         curr_min_slot[-1 * i] = last_task
