@@ -187,7 +187,12 @@ def _claude_generate(model, prompt, max_tokens, temperature, stop):
       system=SYSTEM_INSTRUCTION,
       messages=[{"role": "user", "content": prompt}])
   if stop:
-    kwargs["stop_sequences"] = stop
+    # Anthropic rejects stop sequences that are only whitespace ("each stop
+    # sequence must contain non-whitespace"). The legacy prompts pass stops
+    # like "\n", which is valid for OpenAI but not Claude -- drop those.
+    claude_stop = [s for s in stop if s.strip()]
+    if claude_stop:
+      kwargs["stop_sequences"] = claude_stop
   resp = client.messages.create(**kwargs)
   # Concatenate any text blocks in the response.
   return "".join(b.text for b in resp.content if getattr(b, "type", None)
