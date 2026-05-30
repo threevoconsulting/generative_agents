@@ -112,19 +112,25 @@ The agents start moving as the run proceeds.
 
 ## B. Docker / Synology / Portainer
 
-See **`DOCKER.md`** for the full walkthrough. In brief:
+The image is **built on your PC and pushed to Docker Hub**, then the NAS pulls
+it (no PyTorch compile on the NAS). Full walkthrough in **`DOCKER.md`**; in brief:
 
 ```bash
-# build + run locally
+# 1) On your PC, in the repo root: build and push the image
+docker login
+docker build -t YOUR_DOCKERHUB_USER/generative-agents:latest .
+docker push   YOUR_DOCKERHUB_USER/generative-agents:latest
+
+# 2) (optional) test it locally before deploying to the NAS
 export ANTHROPIC_API_KEY=sk-ant-...
-docker compose up --build
-# then open http://localhost:8000/simulator_play?name=Alex
-# and start the backend inside the container:
+export GA_IMAGE=YOUR_DOCKERHUB_USER/generative-agents:latest
+docker compose up -d
 docker exec -it generative-agents bash -lc \
   'cd /app/reverie/backend_server && python reverie.py'
 ```
-On Portainer, deploy `docker-compose.yml` as a Stack, set `ANTHROPIC_API_KEY`,
-and start the backend via the container Console.
+On the NAS, deploy `docker-compose.yml` as a Portainer **Stack** and set the
+`ANTHROPIC_API_KEY` and `GA_IMAGE` environment variables; the stack pulls the
+image. Start the backend via the container **Console**.
 
 ---
 

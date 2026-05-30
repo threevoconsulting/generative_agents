@@ -1,7 +1,14 @@
 # Generative Agents -- single-container stack for Synology / Portainer.
 #
-# Deploy as a Portainer "Stack". Set ANTHROPIC_API_KEY (and optionally
-# DJANGO_ALLOWED_HOSTS) in the stack's environment variables.
+# This stack PULLS a prebuilt image (no building on the NAS). Build and push it
+# from your PC first, in the repo root:
+#
+#   docker build  -t YOUR_DOCKERHUB_USER/generative-agents:latest .
+#   docker push   YOUR_DOCKERHUB_USER/generative-agents:latest
+#
+# Then set GA_IMAGE to that same name (in the Portainer stack's environment
+# variables, or edit the default below) and deploy the stack. Also set
+# ANTHROPIC_API_KEY.
 #
 # After it is up:
 #   - Open http://<nas-ip>:8000/simulator_play?name=Alex  (play mode)
@@ -12,9 +19,9 @@
 
 services:
   generative-agents:
-    build: .
-    image: generative-agents:latest
+    image: ${GA_IMAGE:-YOUR_DOCKERHUB_USER/generative-agents:latest}
     container_name: generative-agents
+    pull_policy: always
     ports:
       - "8000:8000"
     environment:
