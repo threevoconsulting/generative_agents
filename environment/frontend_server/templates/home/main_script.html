@@ -44,7 +44,14 @@
 	// Phaser 3.0 global settings. 
 	// Configuration meant to be passed to the main Phaser game instance. 
 	const config = {
-	  type: Phaser.AUTO,
+	  // Use CANVAS, not Phaser.AUTO (which prefers WebGL). The interior tilesets
+	  // are ~10,000px tall, which exceeds the 8192px max texture size on many
+	  // GPUs; under WebGL those oversized textures fail to upload and the
+	  // building interiors render as black blocks (outdoor 512x512 tilesets are
+	  // unaffected). The Canvas renderer has no max-texture-size limit, so the
+	  // interiors paint correctly on any GPU. (Maps are static here, so the
+	  // small perf cost of Canvas vs WebGL is irrelevant.)
+	  type: Phaser.CANVAS,
 	  // Responsive scaling: the game renders at a fixed 1500x800 design
 	  // resolution and is scaled to FIT the parent container (preserving aspect
 	  // ratio and centering), so it adapts to phones, tablets and desktops.
