@@ -61,15 +61,18 @@ The cognitive loop makes many low-judgment calls per step and only a few that be
 #### Running fully locally (no API cost) with Ollama
 You can run the agents on a local model via [Ollama](https://ollama.com) instead of a paid API. Conversation quality is lower than Claude, but on a 32GB Apple-silicon Mac the defaults below give believable agents at a usable speed:
 
-1. Install Ollama and pull the model (the default is tuned for a 32GB Mac):
+1. Install [Ollama](https://ollama.com) and pull the model (the default is tuned for a 32GB Mac):
    ```
    ollama pull qwen2.5:14b-instruct
    ```
    (For better conversations with more RAM, pull `qwen2.5:32b-instruct` and set `OLLAMA_MODEL_STRONG` to it.)
-2. Point the backend at Ollama:
+2. Point the backend at Ollama by setting one environment variable before starting `reverie.py`:
    ```
-   LLM_PROVIDER=ollama
+   export LLM_PROVIDER=ollama
    ```
+   No `ANTHROPIC_API_KEY` is needed in this mode — generation runs on your machine.
+
+> **Running the backend in Docker (e.g. on a Mac)?** Ollama runs on the *host*, the backend in the *container*, so two extra things are required — see [DOCKER.md → "Run locally with Ollama"](DOCKER.md). In short: start Ollama with `OLLAMA_HOST=0.0.0.0:11434 ollama serve` (so the container can reach it) and set the app's `OLLAMA_HOST=http://host.docker.internal:11434`.
 
 | Setting | Default | Purpose |
 | --- | --- | --- |

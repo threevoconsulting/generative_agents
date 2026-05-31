@@ -69,6 +69,53 @@ harmless on an Intel Mac/PC (already amd64).
    The agents move as the run proceeds. The top-right dot is **green** when the
    real-time WebSocket is connected, **grey** if it fell back to polling.
 
+## Run locally with Ollama (no API key, no cost)
+
+Instead of Claude, you can drive the agents with a **local model served by
+[Ollama](https://ollama.com)** on your Mac/PC. This is the cheapest way to run
+and iterate; conversation quality is lower than Claude, but on a 32GB
+Apple-silicon Mac the defaults are believable at a usable speed. **The model
+runs on your host; the simulation runs in the container** — so the only real
+setup is wiring the two together.
+
+### 1. Start Ollama on the host and pull the model
+```bash
+# Listen on all interfaces so the container can reach it (NOT just 127.0.0.1),
+# then pull the model. Leave this server running.
+OLLAMA_HOST=0.0.0.0:11434 ollama serve      # one terminal
+ollama pull qwen2.5:14b-instruct            # another terminal
+```
+> The `OLLAMA_HOST` above is **Ollama's own server-bind** variable — unrelated
+> to the app's `OLLAMA_HOST` (the client URL) in step 2. The names coincide.
+
+### 2. Point the container at it
+Uncomment the Ollama `environment:` block in `docker-compose.override.yml`
+(it sets `LLM_PROVIDER=ollama` and `OLLAMA_HOST=http://host.docker.internal:11434`),
+then bring the stack up locally:
+```bash
+docker compose up -d        # merges docker-compose.yml + the override
+```
+`ANTHROPIC_API_KEY` can be left empty in this mode. The override also adds
+`extra_hosts: host.docker.internal:host-gateway` so this works on Linux hosts
+too (Docker Desktop on Mac/Windows already resolves that name).
+
+### 3. Run it
+Same as ["Start a simulation"](#start-a-simulation) above — open
+`http://localhost:8000/`, then in the container console run `python reverie.py`.
+
+### Notes for the local Ollama path
+- **First step is slow.** On first use the container downloads the embedding
+  model (`bge-large-en-v1.5`, ~1.3GB from HuggingFace, so the container needs
+  internet once), and Ollama loads the LLM into RAM. Subsequent steps are
+  steady.
+- **Build a native arm64 image for a faster Mac experience.** The NAS image is
+  amd64 and runs *emulated* on Apple Silicon, which slows the in-container
+  embeddings. For local-only use, build native: `docker build -t
+  generative-agents:latest .` (drop `--platform linux/amd64`). The LLM itself
+  always runs natively on the host via Ollama regardless.
+- **Verify connectivity** from inside the container if generation errors out:
+  `curl http://host.docker.internal:11434/api/tags` should list your model.
+
 ## Notes & troubleshooting
 - **Persistence:** generated simulations live in the `ga_storage` named volume
   and survive restarts. It is seeded from the image's bundled `base_*`
@@ -76,9 +123,10 @@ harmless on an Intel Mac/PC (already amd64).
 - **Always start fresh** from a `base_*` simulation. Do not resume an old
   `July1_*` run (different embedding dimensionality).
 - **Provider/cost:** defaults to Claude (Haiku for most calls, Sonnet for
-  conversation/reflection) + local embeddings (no embedding API cost). To use
-  OpenAI instead, set `LLM_PROVIDER=openai`, `EMBEDDING_BACKEND=openai`, and
-  `OPENAI_API_KEY` in the stack env.
+  conversation/reflection) + local `bge-large-en-v1.5` embeddings (no embedding
+  API cost). To use OpenAI instead, set `LLM_PROVIDER=openai`,
+  `EMBEDDING_BACKEND=openai`, and `OPENAI_API_KEY` in the stack env. To run
+  **fully local with no API key**, see ["Run locally with Ollama"](#run-locally-with-ollama-no-api-key-no-cost) above.
 - **If the image build fails on a dependency**, the likely culprit is the
   Django add-on version range in `environment/frontend_server/requirements.txt`;
   pinning `django-cors-headers==2.5.3` and `django-storages-redux==1.3.3` (the
