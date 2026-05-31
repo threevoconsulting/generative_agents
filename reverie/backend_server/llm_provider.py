@@ -48,7 +48,10 @@ def _cfg(name, default):
 
 
 # Which vendor handles text generation / embeddings.
-LLM_PROVIDER = _cfg("LLM_PROVIDER", "claude").lower()        # "claude" | "openai"
+#   "claude"  -> Anthropic API (best quality, paid)
+#   "openai"  -> OpenAI API (paid)
+#   "ollama"  -> a local model served by Ollama (free, runs on your hardware)
+LLM_PROVIDER = _cfg("LLM_PROVIDER", "claude").lower()        # claude | openai | ollama
 EMBEDDING_BACKEND = _cfg("EMBEDDING_BACKEND", "local").lower()  # "local" | "openai"
 
 # Model identifiers per tier. Override any of these via env var or utils.py.
@@ -57,12 +60,30 @@ CLAUDE_MODEL_STRONG = _cfg("CLAUDE_MODEL_STRONG", "claude-sonnet-4-6")
 OPENAI_MODEL_CHEAP = _cfg("OPENAI_MODEL_CHEAP", "gpt-4o-mini")
 OPENAI_MODEL_STRONG = _cfg("OPENAI_MODEL_STRONG", "gpt-4o")
 
+# Ollama (local). Defaults are tuned for a 32GB Apple-silicon Mac: Qwen2.5-14B
+# (the balanced sweet spot) for both tiers. Bump the "strong" tier to
+# "qwen2.5:32b-instruct" if you have the RAM and want better conversations.
+# OLLAMA_HOST: when the backend runs inside Docker on a Mac, the Ollama server
+# lives on the *host*, so point at host.docker.internal, e.g.
+#   OLLAMA_HOST=http://host.docker.internal:11434
+OLLAMA_HOST = _cfg("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
+OLLAMA_MODEL_CHEAP = _cfg("OLLAMA_MODEL_CHEAP", "qwen2.5:14b-instruct")
+OLLAMA_MODEL_STRONG = _cfg("OLLAMA_MODEL_STRONG", "qwen2.5:14b-instruct")
+# Context window the local model is loaded with. Bigger = more retrieved memory
+# fits in each prompt (better grounding), at the cost of RAM/speed.
+OLLAMA_NUM_CTX = int(_cfg("OLLAMA_NUM_CTX", "8192"))
+# Repetition penalty curbs the looping/echoing that small local models fall
+# into, which noticeably improves conversation quality.
+OLLAMA_REPEAT_PENALTY = float(_cfg("OLLAMA_REPEAT_PENALTY", "1.1"))
+
 # Embedding models. The local backend uses sentence-transformers (runs on the
-# server, no API cost, no rate limits). NOTE: switching embedding backends
-# changes the vector dimensionality, so it is only safe to resume a simulation
-# with the same backend it was created under. Base simulations ship with empty
-# embedding stores, so starting fresh is always safe.
-LOCAL_EMBED_MODEL = _cfg("LOCAL_EMBED_MODEL", "all-MiniLM-L6-v2")
+# server, no API cost, no rate limits). The default is bge-large-en-v1.5, which
+# gives substantially better memory retrieval than the older all-MiniLM-L6-v2
+# (set LOCAL_EMBED_MODEL=all-MiniLM-L6-v2 to revert to the smaller/faster one).
+# NOTE: switching embedding model changes the vector dimensionality, so it is
+# only safe to resume a simulation with the same model it was created under.
+# Base simulations ship with empty embedding stores, so starting fresh is safe.
+LOCAL_EMBED_MODEL = _cfg("LOCAL_EMBED_MODEL", "BAAI/bge-large-en-v1.5")
 OPENAI_EMBED_MODEL = _cfg("OPENAI_EMBED_MODEL", "text-embedding-3-small")
 
 # Default cap on generated tokens for chat-style calls that don't specify one.
@@ -133,6 +154,8 @@ def _model_for_tier(tier):
   strong = (tier == "strong")
   if LLM_PROVIDER == "claude":
     return CLAUDE_MODEL_STRONG if strong else CLAUDE_MODEL_CHEAP
+  if LLM_PROVIDER == "ollama":
+    return OLLAMA_MODEL_STRONG if strong else OLLAMA_MODEL_CHEAP
   return OPENAI_MODEL_STRONG if strong else OPENAI_MODEL_CHEAP
 
 
@@ -147,7 +170,7 @@ def _clean_stop(stop):
 
 
 def generate_text(prompt, tier="cheap", max_tokens=None, temperature=0.7,
-                  stop=None):
+                  stop=None, json_mode=False):
   """
   Generate text from the configured provider.
 
@@ -157,6 +180,11 @@ def generate_text(prompt, tier="cheap", max_tokens=None, temperature=0.7,
     max_tokens: cap on output tokens; defaults to DEFAULT_MAX_TOKENS.
     temperature: sampling temperature, clamped to [0, 1].
     stop: optional stop string or list of strings.
+    json_mode: if True, ask the provider to constrain output to valid JSON.
+      Honoured by the Ollama provider (via the native `format: json` grammar),
+      which is the most effective way to stop small local models from breaking
+      the structured formats this codebase parses. Ignored by providers that
+      don't expose it.
   RETURNS:
     The generated string, or ERROR_SENTINEL on repeated failure.
   """
@@ -172,6 +200,9 @@ def generate_text(prompt, tier="cheap", max_tokens=None, temperature=0.7,
         return _claude_generate(model, prompt, max_tokens, temperature, stop)
       elif LLM_PROVIDER == "openai":
         return _openai_generate(model, prompt, max_tokens, temperature, stop)
+      elif LLM_PROVIDER == "ollama":
+        return _ollama_generate(model, prompt, max_tokens, temperature, stop,
+                                json_mode)
       else:
         raise ValueError(f"Unknown LLM_PROVIDER: {LLM_PROVIDER}")
     except Exception as e:  # transient API/network error -> backoff and retry
@@ -214,6 +245,36 @@ def _openai_generate(model, prompt, max_tokens, temperature, stop):
       messages=[{"role": "system", "content": SYSTEM_INSTRUCTION},
                 {"role": "user", "content": prompt}])
   return resp.choices[0].message.content or ""
+
+
+def _ollama_generate(model, prompt, max_tokens, temperature, stop, json_mode):
+  """
+  Generate text from a local model served by Ollama via its native /api/chat
+  endpoint. We use the native API (rather than the OpenAI-compat shim) so we can
+  pass `format: "json"` for grammar-constrained output and `repeat_penalty` to
+  curb the looping that small local models are prone to.
+  """
+  import requests
+  options = {
+      "temperature": temperature,
+      "num_predict": max_tokens,
+      "num_ctx": OLLAMA_NUM_CTX,
+      "repeat_penalty": OLLAMA_REPEAT_PENALTY,
+  }
+  if stop:
+    options["stop"] = stop
+  payload = {
+      "model": model,
+      "stream": False,
+      "options": options,
+      "messages": [{"role": "system", "content": SYSTEM_INSTRUCTION},
+                   {"role": "user", "content": prompt}],
+  }
+  if json_mode:
+    payload["format"] = "json"
+  resp = requests.post(f"{OLLAMA_HOST}/api/chat", json=payload, timeout=300)
+  resp.raise_for_status()
+  return resp.json().get("message", {}).get("content", "") or ""
 
 
 # --------------------------------------------------------------------------- #

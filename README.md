@@ -48,15 +48,38 @@ All LLM and embedding calls funnel through `reverie/backend_server/llm_provider.
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
-| `LLM_PROVIDER` | `claude` | Text provider: `claude` or `openai` |
+| `LLM_PROVIDER` | `claude` | Text provider: `claude`, `openai`, or `ollama` (local, free) |
 | `EMBEDDING_BACKEND` | `local` | Embeddings: `local` (sentence-transformers) or `openai` |
 | `CLAUDE_MODEL_CHEAP` | `claude-haiku-4-5-20251001` | High-frequency calls (perception, planning, action resolution) |
 | `CLAUDE_MODEL_STRONG` | `claude-sonnet-4-6` | Conversation and reflection |
-| `LOCAL_EMBED_MODEL` | `all-MiniLM-L6-v2` | Local embedding model |
+| `LOCAL_EMBED_MODEL` | `BAAI/bge-large-en-v1.5` | Local embedding model (better retrieval than the older `all-MiniLM-L6-v2`) |
 
 The cognitive loop makes many low-judgment calls per step and only a few that benefit from a stronger model, so the cheap/strong tiering keeps cost down while preserving conversation quality.
 
-> **Embedding compatibility note:** different embedding backends produce vectors of different dimensionality. It is only safe to *resume* a saved simulation with the same `EMBEDDING_BACKEND` it was created under. Base simulations ship with empty embedding stores, so starting a fresh simulation is always safe.
+> **Embedding compatibility note:** different embedding backends produce vectors of different dimensionality. It is only safe to *resume* a saved simulation with the same `EMBEDDING_BACKEND`/`LOCAL_EMBED_MODEL` it was created under. Base simulations ship with empty embedding stores, so starting a fresh simulation is always safe.
+
+#### Running fully locally (no API cost) with Ollama
+You can run the agents on a local model via [Ollama](https://ollama.com) instead of a paid API. Conversation quality is lower than Claude, but on a 32GB Apple-silicon Mac the defaults below give believable agents at a usable speed:
+
+1. Install Ollama and pull the model (the default is tuned for a 32GB Mac):
+   ```
+   ollama pull qwen2.5:14b-instruct
+   ```
+   (For better conversations with more RAM, pull `qwen2.5:32b-instruct` and set `OLLAMA_MODEL_STRONG` to it.)
+2. Point the backend at Ollama:
+   ```
+   LLM_PROVIDER=ollama
+   ```
+
+| Setting | Default | Purpose |
+| --- | --- | --- |
+| `OLLAMA_HOST` | `http://localhost:11434` | Ollama server URL. **Running the backend in Docker on a Mac?** Set this to `http://host.docker.internal:11434` so the container can reach Ollama on the host. |
+| `OLLAMA_MODEL_CHEAP` | `qwen2.5:14b-instruct` | High-frequency calls |
+| `OLLAMA_MODEL_STRONG` | `qwen2.5:14b-instruct` | Conversation and reflection (bump to `qwen2.5:32b-instruct` for higher quality) |
+| `OLLAMA_NUM_CTX` | `8192` | Context window; larger fits more retrieved memory per prompt (better grounding) at the cost of RAM/speed |
+| `OLLAMA_REPEAT_PENALTY` | `1.1` | Curbs the repetitive looping small local models fall into |
+
+Structured calls are sent with Ollama's `format: json` grammar constraint where applicable, which keeps small local models from breaking the formats the simulation parses. The local embedding model (`bge-large-en-v1.5`) runs in-process regardless of text provider, so memory retrieval stays free and high-quality.
  
 ### Step 2. Install requirements.txt
 Install everything listed in the `requirements.txt` file (I strongly recommend first setting up a virtualenv as usual). A note on Python version: we tested our environment on Python 3.9.12. 
