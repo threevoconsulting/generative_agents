@@ -59,20 +59,34 @@ The cognitive loop makes many low-judgment calls per step and only a few that be
 > **Embedding compatibility note:** different embedding backends produce vectors of different dimensionality. It is only safe to *resume* a saved simulation with the same `EMBEDDING_BACKEND`/`LOCAL_EMBED_MODEL` it was created under. Base simulations ship with empty embedding stores, so starting a fresh simulation is always safe.
 
 #### Running fully locally (no API cost) with Ollama
-You can run the agents on a local model via [Ollama](https://ollama.com) instead of a paid API. Conversation quality is lower than Claude, but on a 32GB Apple-silicon Mac the defaults below give believable agents at a usable speed:
+You can run the agents on a local model via [Ollama](https://ollama.com) instead of a paid API. Conversation quality is lower than Claude, but on a 32GB Apple-silicon Mac the defaults below give believable agents at a usable speed.
 
-1. Install [Ollama](https://ollama.com) and pull the model (the default is tuned for a 32GB Mac):
-   ```
-   ollama pull qwen2.5:14b-instruct
-   ```
-   (For better conversations with more RAM, pull `qwen2.5:32b-instruct` and set `OLLAMA_MODEL_STRONG` to it.)
-2. Point the backend at Ollama by setting one environment variable before starting `reverie.py`:
-   ```
-   export LLM_PROVIDER=ollama
-   ```
-   No `ANTHROPIC_API_KEY` is needed in this mode — generation runs on your machine.
+> **📘 Running on a Mac? Follow [SETUP.md](SETUP.md)** — a detailed, start-to-finish local setup guide (prerequisites, Ollama, the two servers, tuning, and troubleshooting). The summary below is the condensed version.
 
-> **Running the backend in Docker (e.g. on a Mac)?** Ollama runs on the *host*, the backend in the *container*, so two extra things are required — see [DOCKER.md → "Run locally with Ollama"](DOCKER.md). In short: start Ollama with `OLLAMA_HOST=0.0.0.0:11434 ollama serve` (so the container can reach it) and set the app's `OLLAMA_HOST=http://host.docker.internal:11434`.
+**Native quickstart (no Docker — simplest and fastest on a Mac):**
+
+1. Install [Ollama](https://ollama.com), then start it and pull the model (the default is tuned for a 32GB Mac):
+   ```
+   ollama serve                          # leave running (or use the Ollama app)
+   ollama pull qwen2.5:14b-instruct      # for better chat with 32GB+: also pull qwen2.5:32b-instruct
+   ```
+2. Set up Python (**3.9 — Django 2.2 won't run on 3.10+**), install both requirements files, and create `utils.py`:
+   ```
+   python3 -m venv venv && source venv/bin/activate
+   pip install -r requirements.txt
+   pip install -r environment/frontend_server/requirements.txt
+   cp reverie/backend_server/utils.docker.py reverie/backend_server/utils.py
+   ```
+3. Start the **environment server** (terminal A) and the **backend** pointed at Ollama (terminal B):
+   ```
+   # terminal A
+   cd environment/frontend_server && python manage.py runserver
+   # terminal B
+   cd reverie/backend_server && export LLM_PROVIDER=ollama && python reverie.py
+   ```
+   No `ANTHROPIC_API_KEY` is needed in this mode — generation runs on your machine. Then continue with the **Running a Simulation** steps below (forked sim `base_the_ville_isabella_maria_klaus`, then `run 100`).
+
+> **Running the backend in Docker instead?** Ollama runs on the *host*, the backend in the *container*, so two extra things are required — see [DOCKER.md → "Run locally with Ollama"](DOCKER.md). In short: start Ollama with `OLLAMA_HOST=0.0.0.0:11434 ollama serve` (so the container can reach it) and set the app's `OLLAMA_HOST=http://host.docker.internal:11434`.
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
