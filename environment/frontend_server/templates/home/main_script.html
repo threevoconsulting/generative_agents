@@ -661,10 +661,25 @@
 
 			      // There is no dedicated "lying down" sprite, so while an agent is
 			      // sleeping we rotate the idle sprite onto its side -- this reads as
-			      // lying in bed rather than standing on it. Any other idle action
-			      // (reading, cooking, etc.) stays upright.
-			      let idle_desc = (execute_movement["persona"][curr_persona_name] || {})["description"] || "";
-			      curr_persona.setAngle(idle_desc.toLowerCase().indexOf("sleep") >= 0 ? 90 : 0);
+			      // lying in bed rather than standing on it. When the backend supplies
+			      // the bed's geometry (object_pose) we align to the bed's real long
+			      // axis and snap to its center; otherwise we fall back to a 90 deg
+			      // rotate. Any other idle action (reading, cooking, etc.) stays
+			      // upright.
+			      let curr_pinfo = execute_movement["persona"][curr_persona_name] || {};
+			      let idle_desc = (curr_pinfo["description"] || "").toLowerCase();
+			      let pose = curr_pinfo["object_pose"];
+			      if (idle_desc.indexOf("sleep") >= 0) {
+			        if (pose && pose["anchor_tile"]) {
+			          curr_persona.setAngle(pose["orient"] === "h" ? 90 : 0);
+			          curr_persona.body.x = pose["anchor_tile"][0] * tile_width;
+			          curr_persona.body.y = pose["anchor_tile"][1] * tile_width;
+			        } else {
+			          curr_persona.setAngle(90);
+			        }
+			      } else {
+			        curr_persona.setAngle(0);
+			      }
 			    };
 
 	      } 

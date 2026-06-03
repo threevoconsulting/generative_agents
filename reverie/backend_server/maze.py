@@ -246,7 +246,58 @@ class Maze:
     return self.tiles[y][x]
 
 
-  def get_tile_path(self, tile, level): 
+  def get_game_object_pose(self, tile):
+    """
+    If <tile> sits on a game object (e.g. a bed), return the geometry of the
+    contiguous cluster of tiles that make up that same object within the same
+    arena. This lets the frontend place/orient a persona on the real object
+    (e.g. lie aligned and centered on the actual bed) instead of guessing.
+
+    INPUT
+      tile: (x, y) tile coordinate.
+    OUTPUT
+      None if the tile has no game object, else a dict:
+        {"object": <name>,
+         "orient": "h" | "v",          # long axis of the cluster
+         "anchor_tile": [cx, cy]}      # cluster center in (float) tile coords
+      The frontend multiplies anchor_tile by its tile_width to get pixels
+      (matching its movement_target = tile * tile_width convention).
+    """
+    x, y = tile[0], tile[1]
+    base = self.tiles[y][x]
+    obj = base["game_object"]
+    if not obj:
+      return None
+    arena = base["arena"]
+
+    # Flood-fill the contiguous same-object/same-arena region (4-connected).
+    seen = set()
+    stack = [(x, y)]
+    xs, ys = [], []
+    while stack:
+      cx, cy = stack.pop()
+      if (cx, cy) in seen:
+        continue
+      if cx < 0 or cy < 0 or cx >= self.maze_width or cy >= self.maze_height:
+        continue
+      t = self.tiles[cy][cx]
+      if t["game_object"] != obj or t["arena"] != arena:
+        continue
+      seen.add((cx, cy))
+      xs.append(cx)
+      ys.append(cy)
+      stack += [(cx + 1, cy), (cx - 1, cy), (cx, cy + 1), (cx, cy - 1)]
+
+    min_x, max_x = min(xs), max(xs)
+    min_y, max_y = min(ys), max(ys)
+    width = max_x - min_x + 1
+    height = max_y - min_y + 1
+    orient = "h" if width >= height else "v"
+    anchor_tile = [(min_x + max_x) / 2.0, (min_y + max_y) / 2.0]
+    return {"object": obj, "orient": orient, "anchor_tile": anchor_tile}
+
+
+  def get_tile_path(self, tile, level):
     """
     Get the tile string address given its coordinate. You designate the level
     by giving it a string level description. 

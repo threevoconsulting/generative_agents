@@ -483,8 +483,14 @@ class ReverieServer:
             movements["persona"][persona_name]["description"] = description
             movements["persona"][persona_name]["chat"] = (persona
                                                           .scratch.chat)
+            # Geometry of the game object the persona is currently on (e.g. the
+            # bed), so the frontend can place/orient them on the real object
+            # rather than guessing. None while travelling (path tiles have no
+            # game object).
+            movements["persona"][persona_name]["object_pose"] = (
+                self.maze.get_game_object_pose(next_tile))
 
-          # Include the meta information about the current stage in the 
+          # Include the meta information about the current stage in the
           # movements dictionary. 
           movements["meta"]["curr_time"] = (self.curr_time 
                                              .strftime("%B %d, %Y, %H:%M:%S"))
