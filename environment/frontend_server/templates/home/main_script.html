@@ -181,6 +181,9 @@
 
 	// <tile_width> is the width of one individual tile (tiles are square)
 	let tile_width = 32;
+	// While sleeping, rotate the idle sprite to lie along the bed's long axis
+	// (using object_pose from the backend). Set to false to keep agents upright.
+	let GROUND_SLEEP = true;
 	// Important: tile_width % movement_speed has to be 0. 
 	// <movement_speed> determines how fast we move at each upate cylce. 
 	let movement_speed = 32; 
@@ -666,17 +669,15 @@
 			      // axis and snap to its center; otherwise we fall back to a 90 deg
 			      // rotate. Any other idle action (reading, cooking, etc.) stays
 			      // upright.
+			      // Rotate to lie along the bed's long axis if we know it, else a
+			      // plain 90deg. We deliberately do NOT move the sprite -- it already
+			      // sits on the bed tile from pathfinding, and repositioning was
+			      // shoving agents off their beds.
 			      let curr_pinfo = execute_movement["persona"][curr_persona_name] || {};
 			      let idle_desc = (curr_pinfo["description"] || "").toLowerCase();
 			      let pose = curr_pinfo["object_pose"];
-			      if (idle_desc.indexOf("sleep") >= 0) {
-			        if (pose && pose["anchor_tile"]) {
-			          curr_persona.setAngle(pose["orient"] === "h" ? 90 : 0);
-			          curr_persona.body.x = pose["anchor_tile"][0] * tile_width;
-			          curr_persona.body.y = pose["anchor_tile"][1] * tile_width;
-			        } else {
-			          curr_persona.setAngle(90);
-			        }
+			      if (GROUND_SLEEP && idle_desc.indexOf("sleep") >= 0) {
+			        curr_persona.setAngle((pose && pose["orient"] === "v") ? 0 : 90);
 			      } else {
 			        curr_persona.setAngle(0);
 			      }
