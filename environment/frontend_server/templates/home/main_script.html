@@ -640,12 +640,16 @@
 
           if (anims_direction == "l") {
 			      curr_persona.anims.play("misa-left-walk", true);
+			      curr_persona.setAngle(0);
 			    } else if (anims_direction == "r") {
 			      curr_persona.anims.play("misa-right-walk", true);
+			      curr_persona.setAngle(0);
 			    } else if (anims_direction == "u") {
 			      curr_persona.anims.play("misa-back-walk", true);
+			      curr_persona.setAngle(0);
 			    } else if (anims_direction == "d") {
 			      curr_persona.anims.play("misa-front-walk", true);
+			      curr_persona.setAngle(0);
 			    } else {
 			      curr_persona.anims.stop();
 
@@ -654,6 +658,13 @@
 			      if (pre_anims_direction_dict[curr_persona_name] == "r") curr_persona.setTexture("atlas", "misa-right");else
 			      if (pre_anims_direction_dict[curr_persona_name] == "u") curr_persona.setTexture("atlas", "misa-back");else
 			      if (pre_anims_direction_dict[curr_persona_name] == "d") curr_persona.setTexture("atlas", "misa-front");
+
+			      // There is no dedicated "lying down" sprite, so while an agent is
+			      // sleeping we rotate the idle sprite onto its side -- this reads as
+			      // lying in bed rather than standing on it. Any other idle action
+			      // (reading, cooking, etc.) stays upright.
+			      let idle_desc = (execute_movement["persona"][curr_persona_name] || {})["description"] || "";
+			      curr_persona.setAngle(idle_desc.toLowerCase().indexOf("sleep") >= 0 ? 90 : 0);
 			    };
 
 	      } 
