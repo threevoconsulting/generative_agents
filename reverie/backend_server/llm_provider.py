@@ -28,6 +28,8 @@ reflection benefit from a stronger model. Callers request a tier ("cheap" or
 """
 import os
 import time
+import json
+import difflib
 
 # --------------------------------------------------------------------------- #
 # Configuration                                                               #
@@ -252,6 +254,84 @@ def _openai_generate(model, prompt, max_tokens, temperature, stop):
       messages=[{"role": "system", "content": SYSTEM_INSTRUCTION},
                 {"role": "user", "content": prompt}])
   return resp.choices[0].message.content or ""
+
+
+# --------------------------------------------------------------------------- #
+# Constrained choice ("pick one of these options")                            #
+# --------------------------------------------------------------------------- #
+def _snap_to_choice(raw, choices):
+  """Map free-form model text to exactly one of <choices>: exact match first,
+  then substring either way, then closest fuzzy match. Guarantees a return value
+  that is one of <choices> (defaults to the first)."""
+  raw = (raw or "").strip().strip("{}").strip().strip('"').strip()
+  low = raw.lower()
+  for c in choices:
+    if low == c.lower():
+      return c
+  for c in choices:
+    if c.lower() in low or (low and low in c.lower()):
+      return c
+  match = difflib.get_close_matches(raw, choices, n=1, cutoff=0.0)
+  return match[0] if match else choices[0]
+
+
+def generate_choice(prompt, choices, tier="cheap", temperature=0.0):
+  """
+  Return exactly one value from <choices>.
+
+  This is how we keep the agents on the real map. With Ollama we constrain the
+  decode to the exact set (a JSON-schema enum -> grammar-constrained sampling),
+  so the model physically cannot answer with anything outside <choices>. For
+  every provider we then snap the result to the nearest valid choice, so the
+  return value is ALWAYS one of <choices> even if the model misbehaves.
+  """
+  choices = [c.strip() for c in choices if isinstance(c, str) and c.strip()]
+  if not choices:
+    return None
+  if len(choices) == 1:
+    return choices[0]
+
+  raw = ""
+  for attempt in range(_MAX_RETRIES):
+    try:
+      if LLM_PROVIDER == "ollama":
+        raw = _ollama_choice(_model_for_tier(tier), prompt, choices, temperature)
+      else:
+        raw = generate_text(prompt, tier=tier, temperature=temperature,
+                            max_tokens=30)
+      break
+    except Exception:
+      time.sleep(2 ** attempt)
+  return _snap_to_choice(raw, choices)
+
+
+def _ollama_choice(model, prompt, choices, temperature):
+  """Ask Ollama for one of <choices>, constraining the output with a JSON-schema
+  enum so the answer is guaranteed to be a member of the set."""
+  import requests
+  schema = {
+      "type": "object",
+      "properties": {"answer": {"type": "string", "enum": choices}},
+      "required": ["answer"],
+  }
+  user = (prompt + "\n\nReturn JSON of the form {\"answer\": \"<option>\"} where "
+          "<option> is exactly one of: " + ", ".join(choices) + ".")
+  payload = {
+      "model": model,
+      "stream": False,
+      "format": schema,
+      "options": {"temperature": temperature, "num_ctx": OLLAMA_NUM_CTX,
+                  "repeat_penalty": OLLAMA_REPEAT_PENALTY},
+      "messages": [{"role": "system", "content": SYSTEM_INSTRUCTION},
+                   {"role": "user", "content": user}],
+  }
+  resp = requests.post(f"{OLLAMA_HOST}/api/chat", json=payload, timeout=300)
+  resp.raise_for_status()
+  content = resp.json().get("message", {}).get("content", "") or ""
+  try:
+    return json.loads(content).get("answer", content)
+  except Exception:
+    return content
 
 
 def _ollama_generate(model, prompt, max_tokens, temperature, stop, json_mode):

@@ -679,15 +679,17 @@ def run_gpt_prompt_action_sector(action_description,
   prompt = generate_prompt(prompt_input, prompt_template)
 
   fail_safe = get_fail_safe()
-  output = safe_generate_response(prompt, gpt_param, 5, fail_safe,
-                                   __func_validate, __func_clean_up)
+  # Constrain the model to sectors this persona can actually reach.
   y = f"{maze.access_tile(persona.scratch.curr_tile)['world']}"
-  x = [i.strip() for i in persona.s_mem.get_str_accessible_sectors(y).split(",")]
-  if output not in x: 
-    # output = random.choice(x)
-    output = persona.scratch.living_area.split(":")[1]
-
-  print ("DEBUG", random.choice(x), "------", output)
+  sectors = [i.strip() for i in
+             persona.s_mem.get_str_accessible_sectors(y).split(",") if i.strip()]
+  if sectors:
+    output = generate_choice(prompt, sectors, tier="cheap")
+  else:
+    output = safe_generate_response(prompt, gpt_param, 5, fail_safe,
+                                     __func_validate, __func_clean_up)
+    if output not in sectors:
+      output = persona.scratch.living_area.split(":")[1]
 
   if debug or verbose: 
     print_run_prompts(prompt_template, persona, gpt_param, 
@@ -776,13 +778,27 @@ def run_gpt_prompt_action_arena(action_description,
   prompt = generate_prompt(prompt_input, prompt_template)
 
   fail_safe = get_fail_safe()
-  output = safe_generate_response(prompt, gpt_param, 5, fail_safe,
-                                   __func_validate, __func_clean_up)
+  # Constrain the model to arenas that actually exist in this sector (and that
+  # this persona may enter). generate_choice enum-constrains the decode on
+  # Ollama and snaps to the nearest valid arena on any provider, so a
+  # hallucinated arena (e.g. a "kitchen" in an apartment that has none) can
+  # never propagate to execution.
+  arenas = [i.strip() for i in persona.s_mem
+            .get_str_accessible_sector_arenas(f"{act_world}:{act_sector}")
+            .split(",") if i.strip()]
+  valid_arenas = []
+  for a in arenas:
+    if "'s room" in a:
+      if persona.scratch.last_name in a:
+        valid_arenas += [a]
+    else:
+      valid_arenas += [a]
+  if valid_arenas:
+    output = generate_choice(prompt, valid_arenas, tier="cheap")
+  else:
+    output = safe_generate_response(prompt, gpt_param, 5, fail_safe,
+                                     __func_validate, __func_clean_up)
   print (output)
-  # y = f"{act_world}:{act_sector}"
-  # x = [i.strip() for i in persona.s_mem.get_str_accessible_sector_arenas(y).split(",")]
-  # if output not in x: 
-  #   output = random.choice(x)
 
   if debug or verbose: 
     print_run_prompts(prompt_template, persona, gpt_param, 
@@ -835,12 +851,15 @@ def run_gpt_prompt_action_game_object(action_description,
   prompt = generate_prompt(prompt_input, prompt_template)
 
   fail_safe = get_fail_safe()
-  output = safe_generate_response(prompt, gpt_param, 5, fail_safe,
-                                   __func_validate, __func_clean_up)
-
-  x = [i.strip() for i in persona.s_mem.get_str_accessible_arena_game_objects(temp_address).split(",")]
-  if output not in x: 
-    output = random.choice(x)
+  # Constrain the model to objects that actually exist in this arena.
+  objects = [i.strip() for i in persona.s_mem
+             .get_str_accessible_arena_game_objects(temp_address)
+             .split(",") if i.strip()]
+  if objects:
+    output = generate_choice(prompt, objects, tier="cheap")
+  else:
+    output = safe_generate_response(prompt, gpt_param, 5, fail_safe,
+                                     __func_validate, __func_clean_up)
 
   if debug or verbose: 
     print_run_prompts(prompt_template, persona, gpt_param, 

@@ -17,7 +17,7 @@ import json
 import re
 import time
 
-from llm_provider import generate_text, embed, ERROR_SENTINEL
+from llm_provider import generate_text, generate_choice, embed, ERROR_SENTINEL
 
 
 def temp_sleep(seconds=0.1):
