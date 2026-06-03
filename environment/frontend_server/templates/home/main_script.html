@@ -258,12 +258,22 @@
 	  // see: https://labs.phaser.io/view.html?src=src/animation/single%20sprite%20sheet.js
 	  // Joon: Technically, I think this guy had the best tutorial for atlas: 
 	  //       https://www.youtube.com/watch?v=fdXcD9X4NrQ&ab_channel=MorganPage
-	  this.load.atlas("atlas", 
-	                  "https://mikewesthad.github.io/phaser-3-tilemap-blog-posts/post-1/assets/atlas/atlas.png", 
+	  this.load.atlas("atlas",
+	                  "https://mikewesthad.github.io/phaser-3-tilemap-blog-posts/post-1/assets/atlas/atlas.png",
 	                  "https://mikewesthad.github.io/phaser-3-tilemap-blog-posts/post-1/assets/atlas/atlas.json");
+
+	  // Per-character sprite sheets: each agent gets their own look. Every sheet
+	  // (Isabella_Rodriguez.png, etc.) shares the same frame layout defined in
+	  // assets/characters/atlas.json. We key each atlas by the persona's name.
+	  var char_json = "{% static 'assets/characters/atlas.json' %}";
+	  var char_base = char_json.replace("atlas.json", "");
+	  for (var pkey in persona_names) {
+	    this.load.atlas(pkey, char_base + pkey.replace(/ /g, "_") + ".png",
+	                    char_json);
+	  }
 	}
 
-	function create() {  
+	function create() {
 	  const map = this.make.tilemap({ key: "map" });
 	  // Joon: Logging map is really helpful for debugging here: 
 	  //       console.log(map);
@@ -399,10 +409,12 @@
 	    let persona_name = Object.keys(spawn_tile_loc)[i];
 	    let start_pos = [spawn_tile_loc[persona_name][0] * tile_width + tile_width / 2, 
 	                     spawn_tile_loc[persona_name][1] * tile_width + tile_width];
+	    // Each persona renders from their own loaded atlas (keyed by name), so
+	    // they look like themselves instead of all sharing the Misa sprite.
 	    let new_sprite = this.physics.add
-	                         .sprite(start_pos[0], start_pos[1], "atlas", "misa-front")
+	                         .sprite(start_pos[0], start_pos[1], persona_name, "down")
 	                         .setSize(30, 40)
-	                         .setOffset(0, 32); // DEBUG 1 --- I added 32 offset on Dec 29. 
+	                         .setOffset(0, 32); // DEBUG 1 --- I added 32 offset on Dec 29.
 	    // Here, we are creating the persona and its pronunciatio sprites.
 	    personas[persona_name] = new_sprite;
 	    pronunciatios[persona_name] = this.add.text(
@@ -443,6 +455,19 @@
 	    frames: anims.generateFrameNames("atlas", { prefix: "misa-back-walk.", start: 0, end: 3, zeroPad: 3 }),
 	    frameRate: 4,
 	    repeat: -1 });
+
+	  // Per-character walking animations (down/left/right/up) built from each
+	  // agent's own atlas, keyed "<Persona Name>-<dir>-walk".
+	  for (var pkey in persona_names) {
+	    ["down", "left", "right", "up"].forEach(function (dir) {
+	      anims.create({
+	        key: pkey + "-" + dir + "-walk",
+	        frames: anims.generateFrameNames(pkey,
+	                  { prefix: dir + "-walk.", start: 0, end: 3, zeroPad: 3 }),
+	        frameRate: 4,
+	        repeat: -1 });
+	    });
+	  }
 	}
 
 
@@ -642,25 +667,25 @@
           curr_pronunciatio.y = curr_persona.body.y - 42 - 32; // DEBUG 1 --- I added 32 offset on Dec 29. 
 
           if (anims_direction == "l") {
-			      curr_persona.anims.play("misa-left-walk", true);
+			      curr_persona.anims.play(curr_persona_name + "-left-walk", true);
 			      curr_persona.setAngle(0);
 			    } else if (anims_direction == "r") {
-			      curr_persona.anims.play("misa-right-walk", true);
+			      curr_persona.anims.play(curr_persona_name + "-right-walk", true);
 			      curr_persona.setAngle(0);
 			    } else if (anims_direction == "u") {
-			      curr_persona.anims.play("misa-back-walk", true);
+			      curr_persona.anims.play(curr_persona_name + "-up-walk", true);
 			      curr_persona.setAngle(0);
 			    } else if (anims_direction == "d") {
-			      curr_persona.anims.play("misa-front-walk", true);
+			      curr_persona.anims.play(curr_persona_name + "-down-walk", true);
 			      curr_persona.setAngle(0);
 			    } else {
 			      curr_persona.anims.stop();
 
-			      // If we were moving, pick an idle frame to use
-			      if (pre_anims_direction_dict[curr_persona_name] == "l") curr_persona.setTexture("atlas", "misa-left");else
-			      if (pre_anims_direction_dict[curr_persona_name] == "r") curr_persona.setTexture("atlas", "misa-right");else
-			      if (pre_anims_direction_dict[curr_persona_name] == "u") curr_persona.setTexture("atlas", "misa-back");else
-			      if (pre_anims_direction_dict[curr_persona_name] == "d") curr_persona.setTexture("atlas", "misa-front");
+			      // If we were moving, pick an idle frame from this agent's own atlas
+			      if (pre_anims_direction_dict[curr_persona_name] == "l") curr_persona.setTexture(curr_persona_name, "left");else
+			      if (pre_anims_direction_dict[curr_persona_name] == "r") curr_persona.setTexture(curr_persona_name, "right");else
+			      if (pre_anims_direction_dict[curr_persona_name] == "u") curr_persona.setTexture(curr_persona_name, "up");else
+			      if (pre_anims_direction_dict[curr_persona_name] == "d") curr_persona.setTexture(curr_persona_name, "down");
 
 			      // There is no dedicated "lying down" sprite, so while an agent is
 			      // sleeping we rotate the idle sprite onto its side -- this reads as
