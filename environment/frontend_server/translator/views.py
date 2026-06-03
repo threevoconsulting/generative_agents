@@ -336,7 +336,9 @@ def play(request):
     sim_code = json.load(json_file)["sim_code"]
   with open(f_curr_step) as json_file:
     step = json.load(json_file)["step"]
-  os.remove(f_curr_step)
+  # NOTE: do NOT delete curr_step.json here. Like home(), this page must be
+  # reloadable while the backend is running -- deleting it would make a reload
+  # show "Please start the backend first" and leave the backend waiting forever.
 
   persona_names = []
   persona_names_set = set()
