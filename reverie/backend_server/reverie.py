@@ -704,14 +704,62 @@ class ReverieServer:
 
 
 if __name__ == '__main__':
-  # rs = ReverieServer("base_the_ville_isabella_maria_klaus", 
+  # rs = ReverieServer("base_the_ville_isabella_maria_klaus",
   #                    "July1_the_ville_isabella_maria_klaus-step-3-1")
-  # rs = ReverieServer("July1_the_ville_isabella_maria_klaus-step-3-20", 
+  # rs = ReverieServer("July1_the_ville_isabella_maria_klaus-step-3-20",
   #                    "July1_the_ville_isabella_maria_klaus-step-3-21")
   # rs.open_server()
 
-  origin = input("Enter the name of the forked simulation: ").strip()
-  target = input("Enter the name of the new simulation: ").strip()
+  # Friendly labels for the bundled base simulations so you can pick "3 agents"
+  # or "25 agents" instead of remembering the long folder name.
+  FRIENDLY = {
+      "base_the_ville_isabella_maria_klaus": "3 agents  (Isabella, Maria, Klaus)",
+      "base_the_ville_n25": "25 agents (the full town)",
+  }
+
+  # Discover what we can fork from: base_* (fresh starts) first, then any other
+  # saved simulations (to resume from where you left off).
+  all_sims = sorted(d for d in os.listdir(fs_storage)
+                    if os.path.isdir(f"{fs_storage}/{d}") and not d.startswith("."))
+  bases = [s for s in all_sims if s.startswith("base_")]
+  saved = [s for s in all_sims if not s.startswith("base_")]
+  menu = bases + saved
+
+  print()
+  print("=" * 62)
+  print("  Start a simulation -- pick what to fork from:")
+  print("=" * 62)
+  print("  Fresh start:")
+  for i, s in enumerate(bases):
+    print(f"     [{i}]  {FRIENDLY.get(s, s)}")
+  if saved:
+    print("  Resume a saved run:")
+    for i, s in enumerate(saved, start=len(bases)):
+      print(f"     [{i}]  {s}")
+  print("-" * 62)
+
+  choice = input("  Choose a number (or type a name) [0]: ").strip()
+  if choice == "" and menu:
+    origin = menu[0]
+  elif choice.isdigit() and int(choice) < len(menu):
+    origin = menu[int(choice)]
+  else:
+    origin = choice  # allow typing an exact name, as before
+
+  # Suggest a unique run name; just press Enter to accept it. Guaranteeing
+  # uniqueness avoids the classic "reused a name -> weird/stuck run" trap.
+  default_target = datetime.datetime.now().strftime("run-%b%d-%H%M").lower()
+  target = input(f"  Name this run [{default_target}]: ").strip() or default_target
+  while os.path.isdir(f"{fs_storage}/{target}"):
+    target += "-1"
+
+  print()
+  print(f"  Forking '{origin}'  ->  '{target}'")
+  print("  When it reaches 'Enter option:', open ONE of these in your browser:")
+  print("     View mode:  http://localhost:8000/simulator_home")
+  print("     Play mode:  http://localhost:8000/simulator_play?name=Alex")
+  print("  ...then type e.g.  run 2200")
+  print()
 
   rs = ReverieServer(origin, target)
   rs.open_server()
