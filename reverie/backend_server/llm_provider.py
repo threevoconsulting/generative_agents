@@ -89,6 +89,12 @@ OPENAI_EMBED_MODEL = _cfg("OPENAI_EMBED_MODEL", "text-embedding-3-small")
 # Default cap on generated tokens for chat-style calls that don't specify one.
 DEFAULT_MAX_TOKENS = int(_cfg("LLM_DEFAULT_MAX_TOKENS", "1024"))
 
+# Language the model should write in. Some strong local models (notably Qwen,
+# which is bilingual) drift into Chinese on free-form generations; pinning the
+# output language keeps agent speech and descriptions readable. Set to any
+# language name, e.g. RESPONSE_LANGUAGE="Spanish".
+RESPONSE_LANGUAGE = _cfg("RESPONSE_LANGUAGE", "English")
+
 # A short system instruction that nudges chat models to behave like the
 # completion-style endpoints the original prompts were written for (i.e. emit
 # exactly what is asked with no chatty preamble). Helps the existing validators
@@ -101,7 +107,8 @@ SYSTEM_INSTRUCTION = (
     "restating of the prompt, no markdown formatting, no headers or titles, and "
     "no surrounding quotes or code fences. Match the exact format shown by any "
     "examples in the prompt. If the prompt asks for a single value or line, "
-    "return just that.")
+    f"return just that. Always write your entire output in {RESPONSE_LANGUAGE}, "
+    "regardless of the language of the prompt or any examples in it.")
 
 # Sentinel returned on hard failures. The existing retry/validate logic treats
 # any non-conforming string as a failed attempt, so this preserves behaviour.
