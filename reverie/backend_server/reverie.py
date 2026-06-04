@@ -592,14 +592,24 @@ class ReverieServer:
           shutil.rmtree(sim_folder) 
           self.start_path_tester_server()
 
-        elif sim_command.lower() == "exit": 
-          # Finishes the simulation environment but does not save the progress
-          # and erases all saved data from current simulation. 
-          # Example: exit 
-          shutil.rmtree(sim_folder) 
-          break 
+        elif sim_command.lower() == "exit":
+          # Leaves the simulation WITHOUT deleting it. The run folder (and every
+          # movement file written so far) is kept, so the run can be replayed or
+          # resumed later. Use "fin" to also save final persona state, or
+          # "delete" to actually erase the run.
+          print(f"Exited. Run '{self.sim_code}' kept on disk "
+                f"(replay it, or resume by forking it). Use 'delete' to erase.")
+          break
 
-        elif sim_command.lower() == "save": 
+        elif sim_command.lower() == "delete":
+          # Explicitly erase all saved data for the current simulation.
+          # This is the (now opt-in) destructive action that "exit" used to do.
+          # Example: delete
+          shutil.rmtree(sim_folder)
+          print(f"Deleted run '{self.sim_code}'.")
+          break
+
+        elif sim_command.lower() == "save":
           # Saves the current simulation progress. 
           # Example: save
           self.save()
@@ -817,6 +827,8 @@ if __name__ == '__main__':
   print("     View mode:  http://localhost:8000/simulator_home")
   print("     Play mode:  http://localhost:8000/simulator_play?name=Alex")
   print("  ...then type e.g.  run 2200   (for an overnight run, try run 8000+)")
+  print("  Commands: run N | save (checkpoint) | fin (save & quit) | "
+        "exit (quit, keeps run) | delete (quit & erase)")
   print()
 
   rs = ReverieServer(origin, target, scenario=scenario)
