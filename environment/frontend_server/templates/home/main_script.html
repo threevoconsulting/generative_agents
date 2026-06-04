@@ -384,6 +384,25 @@
 	  // Expose the camera so the on-screen touch zoom buttons can drive it.
 	  window.game_camera = camera;
 
+	  // *** FOCUS MODE ***
+	  // Follow a chosen agent ("through their eyes"), switchable live while you
+	  // watch. unfocus() returns to the free-roam camera (the invisible player
+	  // sprite that the arrow keys pan in view/replay mode).
+	  window.focused_persona = null;
+	  window.focusPersona = function (name) {
+	    if (personas[name]) {
+	      camera.startFollow(personas[name]);
+	      camera.setZoom(Math.max(camera.zoom, 1.6));
+	      window.focused_persona = name;
+	      if (window.onFocusChange) window.onFocusChange(name);
+	    }
+	  };
+	  window.unfocus = function () {
+	    camera.startFollow(player);
+	    window.focused_persona = null;
+	    if (window.onFocusChange) window.onFocusChange(null);
+	  };
+
 	  // *** TOUCH GESTURES ***
 	  // Pinch-to-zoom works in every mode. Drag-to-pan is enabled only outside
 	  // play mode -- in play mode a drag must not drag your own avatar around.

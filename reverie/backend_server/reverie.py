@@ -39,10 +39,40 @@ from persona.persona import *
 #                                  REVERIE                                   #
 ##############################################################################
 
-class ReverieServer: 
-  def __init__(self, 
+def _apply_scenario(sim_folder, scenario):
+  """
+  Seed a story premise into a freshly forked simulation by patching the
+  "currently" (and optional "daily_plan_req") of each named persona, before any
+  persona is loaded. Unknown persona names are skipped with a warning.
+
+  <scenario> is a dict like:
+    {"name": "Break-in at Harvey Oak Supply Store",
+     "seeds": {"Isabella Rodriguez": {"currently": "...", "daily_plan_req": "..."},
+               "Klaus Mueller":      {"currently": "..."}}}
+  """
+  seeds = (scenario or {}).get("seeds", {})
+  print(f"[scenario] applying '{scenario.get('name', 'unnamed')}' "
+        f"to {len(seeds)} persona(s)")
+  for name, patch in seeds.items():
+    f = f"{sim_folder}/personas/{name}/bootstrap_memory/scratch.json"
+    if not os.path.exists(f):
+      print(f"[scenario]   skip unknown persona: {name}")
+      continue
+    with open(f) as fh:
+      scr = json.load(fh)
+    for key in ("currently", "daily_plan_req"):
+      if key in patch and patch[key]:
+        scr[key] = patch[key]
+    with open(f, "w") as fh:
+      json.dump(scr, fh, indent=2)
+    print(f"[scenario]   seeded {name}")
+
+
+class ReverieServer:
+  def __init__(self,
                fork_sim_code,
-               sim_code):
+               sim_code,
+               scenario=None):
     # FORKING FROM A PRIOR SIMULATION:
     # <fork_sim_code> indicates the simulation we are forking from. 
     # Interestingly, all simulations must be forked from some initial 
@@ -61,6 +91,14 @@ class ReverieServer:
     # (git does not track empty directories), so ensure it exists before the
     # step loop tries to write movement/<step>.json.
     os.makedirs(f"{sim_folder}/movement", exist_ok=True)
+
+    # SCENARIO SEEDING: optionally plant a premise (a murder, a break-in, a
+    # scandal) into chosen agents before they are loaded, so the town wakes up
+    # already living the story. We patch each seeded persona's "currently"
+    # (and optional "daily_plan_req") -- the same field that drives the bundled
+    # Valentine's-party emergent behavior -- so it propagates through gossip.
+    if scenario:
+      _apply_scenario(sim_folder, scenario)
 
     with open(f"{sim_folder}/reverie/meta.json") as json_file:  
       reverie_meta = json.load(json_file)
@@ -753,15 +791,35 @@ if __name__ == '__main__':
   while os.path.isdir(f"{fs_storage}/{target}"):
     target += "-1"
 
+  # Optional: seed a story premise (murder, break-in, scandal...). Scenario
+  # files live in ./scenarios/*.json. Press Enter for a normal run.
+  scenario = None
+  scen_dir = "scenarios"
+  scen_files = (sorted(f for f in os.listdir(scen_dir) if f.endswith(".json"))
+                if os.path.isdir(scen_dir) else [])
+  if scen_files:
+    print()
+    print("  Apply a scenario? (Enter = none)")
+    for i, f in enumerate(scen_files):
+      try:
+        nm = json.load(open(f"{scen_dir}/{f}")).get("name", f)
+      except Exception:
+        nm = f
+      print(f"     [{i}]  {nm}")
+    sc = input("  Scenario number [none]: ").strip()
+    if sc.isdigit() and int(sc) < len(scen_files):
+      scenario = json.load(open(f"{scen_dir}/{scen_files[int(sc)]}"))
+
   print()
-  print(f"  Forking '{origin}'  ->  '{target}'")
+  print(f"  Forking '{origin}'  ->  '{target}'"
+        + (f"   [scenario: {scenario['name']}]" if scenario else ""))
   print("  When it reaches 'Enter option:', open ONE of these in your browser:")
   print("     View mode:  http://localhost:8000/simulator_home")
   print("     Play mode:  http://localhost:8000/simulator_play?name=Alex")
-  print("  ...then type e.g.  run 2200")
+  print("  ...then type e.g.  run 2200   (for an overnight run, try run 8000+)")
   print()
 
-  rs = ReverieServer(origin, target)
+  rs = ReverieServer(origin, target, scenario=scenario)
   rs.open_server()
 
 

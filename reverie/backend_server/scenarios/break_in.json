@@ -1,0 +1,15 @@
+{
+  "name": "Break-in at Harvey Oak Supply Store",
+  "description": "Someone broke into the supply store overnight. One agent is the culprit; one discovered it. Watch the rumor spread.",
+  "seeds": {
+    "Isabella Rodriguez": {
+      "currently": "Isabella Rodriguez discovered this morning that Harvey Oak Supply Store was broken into overnight - a window was smashed and supplies are missing. She is alarmed and is telling everyone she talks to about the break-in, asking if they saw anything suspicious last night."
+    },
+    "Klaus Mueller": {
+      "currently": "Klaus Mueller secretly broke into Harvey Oak Supply Store last night and took some supplies. He feels guilty and anxious, and is trying very hard to act normal so that nobody suspects him. If anyone brings up the break-in, he deflects and changes the subject."
+    },
+    "Maria Lopez": {
+      "currently": "Maria Lopez was walking home very late last night and thinks she saw someone near Harvey Oak Supply Store, but she isn't sure who it was. She is curious and a little worried, and mentions what she saw to people she trusts."
+    }
+  }
+}

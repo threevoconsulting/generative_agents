@@ -7,6 +7,27 @@
 <div>
 	<div id="game-container" style="text-align: center"></div>
 
+	<!-- FOCUS MODE: click an agent to follow them ("through their eyes"),
+	     switchable live; "Free cam" returns to the roaming camera. -->
+	<div id="focus-bar" style="width:80%; margin:1em auto 0; text-align:center">
+		<strong style="margin-right:0.5em">Focus:</strong>
+		{% for p_name, p_name_os in persona_names %}
+			<button type="button" class="btn btn-default btn-sm focus-btn" data-name="{{ p_name }}"
+			        onclick="window.focusPersona('{{ p_name }}')" style="margin:0.15em">{{ p_name }}</button>
+		{% endfor %}
+		<button type="button" class="btn btn-default btn-sm" onclick="window.unfocus()" style="margin:0.15em">Free cam</button>
+	</div>
+	<script>
+		// Highlight the currently-followed agent's button.
+		window.onFocusChange = function (name) {
+			document.querySelectorAll('.focus-btn').forEach(function (b) {
+				var on = b.getAttribute('data-name') === name;
+				b.classList.toggle('active', on);
+				b.style.fontWeight = on ? 'bold' : 'normal';
+			});
+		};
+	</script>
+
 	<div style="width:55%; margin: 0 auto; margin-top:4.5em">
 		<h3 style="margin-bottom:-0.5em; font-size:1.5em">Current Time:</h3>
 		<div class="row">
