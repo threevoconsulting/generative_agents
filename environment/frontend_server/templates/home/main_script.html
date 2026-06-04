@@ -184,6 +184,11 @@
 	// While sleeping, rotate the idle sprite to lie along the bed's long axis
 	// (using object_pose from the backend). Set to false to keep agents upright.
 	let GROUND_SLEEP = true;
+	// Conversation bubbles: how long (ms) each line of dialogue stays up before
+	// the next line is revealed, plus a per-conversation progress tracker so the
+	// reveal is paced across the conversation instead of dumping all lines at once.
+	let CHAT_LINE_MS = 2800;
+	let convoProgress = {};
 	// Important: tile_width % movement_speed has to be 0. 
 	// <movement_speed> determines how fast we move at each upate cylce. 
 	let movement_speed = 32; 
@@ -637,7 +642,35 @@
 	        pronunciatios[curr_persona_name].setText(initials + ": " + pronunciatio_content);
 	      }
 
-	      console.log(curr_persona_name);
+	      // --- Level B: paced on-map conversation bubbles ---
+      // The backend delivers the whole conversation in "chat" for its duration;
+      // we reveal it one line at a time (paced by wall-clock time), floating the
+      // current line above whoever is speaking. Listeners show a plain balloon.
+      let chat_lines = execute_movement["persona"][curr_persona_name]["chat"];
+      if (chat_lines && chat_lines.length > 0) {
+        let sig = curr_persona_name + "|" + JSON.stringify(chat_lines);
+        if (!convoProgress[sig]) convoProgress[sig] = {idx: 0, tNext: time + CHAT_LINE_MS};
+        let st = convoProgress[sig];
+        if (time > st.tNext && st.idx < chat_lines.length - 1) {
+          st.idx += 1; st.tNext = time + CHAT_LINE_MS;
+        }
+        let line = chat_lines[st.idx];
+        let speaker_first = (line[0] || "").trim().split(" ")[0].toLowerCase();
+        let my_first = curr_persona_name.split(" ")[0].toLowerCase();
+        if (speaker_first === my_first) {
+          curr_pronunciatio.setText("💬 " + line[1]);
+          curr_pronunciatio.setFontSize(14);
+          curr_pronunciatio.setWordWrapWidth(220, true);
+          curr_pronunciatio.setDepth(5);
+        } else {
+          curr_pronunciatio.setText("💬");
+          curr_pronunciatio.setFontSize(28);
+          curr_pronunciatio.setWordWrapWidth(null);
+        }
+      } else {
+        curr_pronunciatio.setFontSize(28);
+        curr_pronunciatio.setWordWrapWidth(null);
+      }
 	      if (execute_count > 0) {
 	        if (curr_persona.body.x < movement_target[curr_persona_name][0]) {
 	          curr_persona.body.x += movement_speed; 
