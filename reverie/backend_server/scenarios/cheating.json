@@ -1,0 +1,18 @@
+{
+  "name": "The Cheating Scandal at Oak Hill College",
+  "description": "A student cheated on a major exam. A witness is torn, the professor is investigating -- and the professor is the cheater's own mother (she doesn't know). An innocent student is being wrongly blamed.",
+  "seeds": {
+    "Eddy Lin": {
+      "currently": "Eddy Lin secretly cheated on an important exam at Oak Hill College. He is terrified of being caught -- especially because his own mother, Mei Lin, is a professor there -- so he acts normal and deflects or downplays things whenever the exam or cheating comes up."
+    },
+    "Maria Lopez": {
+      "currently": "Maria Lopez saw Eddy Lin cheating during the big exam. She is torn about whether to report it or stay quiet, and she cautiously confides what she saw to a few people she trusts to get their advice."
+    },
+    "Mei Lin": {
+      "currently": "Mei Lin, a professor at Oak Hill College, is convinced someone cheated on the recent exam because several answers were suspiciously identical. She is determined to find out who did it, asking students and colleagues what they know -- not realizing the culprit could be her own son, Eddy."
+    },
+    "Klaus Mueller": {
+      "currently": "Klaus Mueller has heard that people are whispering he is the one who cheated on the exam, even though he did absolutely nothing wrong. He is upset and defensive about the unfair suspicion and tries to clear his name with everyone he talks to."
+    }
+  }
+}

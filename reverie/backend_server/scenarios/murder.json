@@ -1,18 +1,19 @@
 {
-  "name": "A death in the Ville - the Giorgio Rossi mystery",
-  "description": "Giorgio is found dead. One agent did it, one witnessed something, one has an obvious motive (red herring). Watch fear, suspicion, and accusations spread.",
+  "name": "A death in the Ville - the Marcus Bell mystery",
+  "description": "Marcus Bell -- a quiet older man who lived at the edge of town -- is found dead. He is NOT a simulated agent (so there's no 'dead man walking'); he exists only in the survivors' memories and gossip. One agent did it, one witnessed something, one has an obvious motive (red herring).",
+  "victim_note": "Marcus Bell is intentionally NOT one of the 25 agents and has no persona folder, so he never spawns or moves -- the town only references him.",
   "seeds": {
     "Hailey Johnson": {
-      "currently": "Hailey Johnson found Giorgio Rossi dead this morning and is shaken and frightened. She is urgently telling everyone she meets about Giorgio's death and asking whether anyone saw or heard anything suspicious last night."
+      "currently": "Hailey Johnson found Marcus Bell -- the quiet older man who lived at the edge of town -- dead this morning, and she is shaken and frightened. She is urgently telling everyone she meets that Marcus Bell is dead and asking whether anyone saw or heard anything suspicious last night."
     },
     "Wolfgang Schulz": {
-      "currently": "Wolfgang Schulz is secretly responsible for Giorgio Rossi's death after a confrontation that went too far. He is anxious and guilt-ridden, trying hard to act normal, and he deflects or changes the subject whenever Giorgio's death is mentioned."
+      "currently": "Wolfgang Schulz is secretly responsible for Marcus Bell's death after a confrontation that went too far last night. He is anxious and guilt-ridden, trying hard to act normal, and he deflects or changes the subject whenever Marcus Bell's death is mentioned."
     },
     "Ayesha Khan": {
-      "currently": "Ayesha Khan overheard a heated, angry argument near Giorgio Rossi's place late last night, though she could not see clearly who was involved. Now that she has heard Giorgio is dead, she is unsettled and shares what she heard with people she trusts."
+      "currently": "Ayesha Khan overheard a heated, angry argument near Marcus Bell's place late last night, though she could not see clearly who was involved. Now that she has heard Marcus Bell is dead, she is unsettled and shares what she heard with people she trusts."
     },
     "Carlos Gomez": {
-      "currently": "Carlos Gomez had a very public, bitter feud with Giorgio Rossi last week in front of many people. Now that Giorgio is dead, Carlos is nervous that everyone will suspect him, and he anxiously tries to convince people he had nothing to do with it."
+      "currently": "Carlos Gomez had a very public, bitter feud with Marcus Bell last week in front of many people. Now that Marcus Bell is dead, Carlos is nervous that everyone will suspect him, and he anxiously tries to convince people he had nothing to do with it."
     }
   }
 }
