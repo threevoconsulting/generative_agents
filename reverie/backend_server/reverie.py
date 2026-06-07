@@ -436,12 +436,14 @@ class ReverieServer:
       if check_if_file_exists(curr_env_file):
         # If we have an environment file, it means we have a new perception
         # input to our personas. So we first retrieve it.
-        try: 
+        try:
           # Try and save block for robustness of the while loop.
           with open(curr_env_file) as json_file:
             new_env = json.load(json_file)
             env_retrieved = True
-        except: 
+        except Exception:
+          # Catch only real errors here -- NOT KeyboardInterrupt -- so that a
+          # Ctrl+C is never swallowed and always pauses the run cleanly.
           pass
       
         if env_retrieved: 
@@ -614,11 +616,19 @@ class ReverieServer:
           # Example: save
           self.save()
 
-        elif sim_command[:3].lower() == "run": 
+        elif sim_command[:3].lower() == "run":
           # Runs the number of steps specified in the prompt.
           # Example: run 1000
           int_count = int(sim_command.split()[-1])
-          rs.start_server(int_count)
+          try:
+            rs.start_server(int_count)
+          except KeyboardInterrupt:
+            # Ctrl+C during a run: stop cleanly and return to the menu instead
+            # of dumping a scary traceback. Every completed step is already
+            # written to disk, so nothing is lost.
+            print(f"\n⏸  Run paused at step {self.step}. Completed steps are "
+                  f"saved on disk.\n   Type 'fin' to save & quit, 'exit' to "
+                  f"quit (keeps the run), or 'run N' to continue.")
 
         elif ("print persona schedule" 
               in sim_command[:22].lower()): 
