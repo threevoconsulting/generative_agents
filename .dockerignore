@@ -1,0 +1,14 @@
+.git
+.gitignore
+**/__pycache__
+**/*.pyc
+**/*.pyo
+venv
+.venv
+env
+*.log
+# Heavy, OpenAI-embedded historical run folders -- not needed (we fork from the
+# base_* simulations, and their embeddings are a different dimensionality than
+# the local model anyway).
+environment/frontend_server/storage/July1_*
+environment/frontend_server/storage/March*

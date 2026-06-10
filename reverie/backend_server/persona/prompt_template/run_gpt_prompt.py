@@ -280,14 +280,76 @@ def run_gpt_prompt_generate_hourly_schedule(persona,
   
   output = safe_generate_response(prompt, gpt_param, 5, fail_safe,
                                    __func_validate, __func_clean_up)
-  
-  if debug or verbose: 
-    print_run_prompts(prompt_template, persona, gpt_param, 
+
+  if debug or verbose:
+    print_run_prompts(prompt_template, persona, gpt_param,
                       prompt_input, prompt, output)
-    
+
   return output, [output, prompt, gpt_param, prompt_input, fail_safe]
 
 
+def run_gpt_prompt_generate_whole_day_hourly_schedule(persona,
+                                                      wake_up_hour,
+                                                      verbose=False):
+  """
+  One-shot replacement for the 24 sequential per-hour schedule calls. Asks the
+  model for the whole day's hourly activities in a single structured request.
+
+  INPUT:
+    persona: The Persona class instance.
+    wake_up_hour: integer hour (0-23) the persona wakes up.
+  OUTPUT:
+    A list of activity strings covering hours [wake_up_hour .. 23] (that is,
+    24 - wake_up_hour entries), or None on failure so the caller can fall back
+    to the per-hour generation path.
+  """
+  hour_str = ["00:00 AM", "01:00 AM", "02:00 AM", "03:00 AM", "04:00 AM",
+              "05:00 AM", "06:00 AM", "07:00 AM", "08:00 AM", "09:00 AM",
+              "10:00 AM", "11:00 AM", "12:00 PM", "01:00 PM", "02:00 PM",
+              "03:00 PM", "04:00 PM", "05:00 PM", "06:00 PM", "07:00 PM",
+              "08:00 PM", "09:00 PM", "10:00 PM", "11:00 PM"]
+
+  n_remaining = 24 - wake_up_hour
+  if n_remaining <= 0:
+    return []
+  target_hours = hour_str[wake_up_hour:]
+
+  name = persona.scratch.get_str_firstname()
+  iss = persona.scratch.get_str_iss()
+  date_str = persona.scratch.get_str_curr_date_str()
+  req_str = "; ".join(f"{i + 1}) {r}"
+                      for i, r in enumerate(persona.scratch.daily_req))
+
+  prompt = (
+      f"{iss}\n\n"
+      f"Today is {date_str}. Here is {name}'s broad plan for the day: "
+      f"{req_str}.\n\n"
+      f"{name} wakes up at {hour_str[wake_up_hour]}. In broad strokes, "
+      f"describe what {name} is doing during each of the following "
+      f"{n_remaining} hourly time slots today, in chronological order. Each "
+      f"activity should complete the sentence \"{name} is ...\" "
+      f"(for example \"eating breakfast\" or \"working on her painting\").\n"
+      f"Time slots: {', '.join(target_hours)}.\n\n"
+      f"Respond with ONLY a JSON array of exactly {n_remaining} short activity "
+      f"strings, in chronological order, and nothing else.\n"
+      f"Example: [\"waking up and completing her morning routine\", "
+      f"\"eating breakfast\", \"...\"]")
+
+  for _ in range(3):
+    try:
+      raw = generate_text(prompt, tier="cheap", max_tokens=700,
+                          temperature=0.5)
+      start = raw.find("[")
+      end = raw.rfind("]") + 1
+      arr = json.loads(raw[start:end])
+      arr = [str(a).strip().rstrip(".") for a in arr]
+      if len(arr) == n_remaining and all(arr):
+        if verbose:
+          print("whole-day schedule (one-shot):", arr)
+        return arr
+    except:
+      pass
+  return None
 
 
 
@@ -357,29 +419,33 @@ def run_gpt_prompt_task_decomp(persona,
     return prompt_input
 
   def __func_clean_up(gpt_response, prompt=""):
-    print ("TOODOOOOOO")
-    print (gpt_response)
-    print ("-==- -==- -==- ")
-
-    # TODO SOMETHING HERE sometimes fails... See screenshot
-    temp = [i.strip() for i in gpt_response.split("\n")]
-    _cr = []
+    # Parse lines of the form:
+    #   "1) Isabella is doing X. (duration in minutes: 5, minutes left: 55)"
+    # Robust to chat-model output: skip header/blank/garbage lines, and strip a
+    # leading "N) <name> is" marker when present (the original completion prompt
+    # ended mid-sentence so davinci omitted that prefix on the first item).
     cr = []
-    for count, i in enumerate(temp): 
-      if count != 0: 
-        _cr += [" ".join([j.strip () for j in i.split(" ")][3:])]
-      else: 
-        _cr += [i]
-    for count, i in enumerate(_cr): 
-      k = [j.strip() for j in i.split("(duration in minutes:")]
+    for line in gpt_response.split("\n"):
+      line = line.strip()
+      if "(duration in minutes:" not in line:
+        continue
+      k = [j.strip() for j in line.split("(duration in minutes:")]
       task = k[0]
-      if task[-1] == ".": 
+      if re.match(r"^\d+[\).]", task):          # numbered item -> drop "N) <name> is"
+        task = " ".join(task.split(" ")[3:]).strip()
+      if task and task[-1] == ".":
         task = task[:-1]
-      duration = int(k[1].split(",")[0].strip())
-      cr += [[task, duration]]
+      try:
+        duration = int(re.search(r"\d+", k[1]).group())
+      except (AttributeError, IndexError, ValueError):
+        continue
+      cr += [[task.strip(), duration]]
 
     total_expected_min = int(prompt.split("(total duration in minutes")[-1]
                                    .split("):")[0].strip())
+
+    if not cr:                                  # nothing parsed -> one block
+      cr = [["idle", total_expected_min]]
     
     # TODO -- now, you need to make sure that this is the same as the sum of 
     #         the current action sequence. 
@@ -392,9 +458,12 @@ def run_gpt_prompt_task_decomp(persona,
       if i_duration > 0: 
         for j in range(i_duration): 
           curr_min_slot += [(i_task, count)]       
-    curr_min_slot = curr_min_slot[1:]   
+    curr_min_slot = curr_min_slot[1:]
 
-    if len(curr_min_slot) > total_expected_min: 
+    if not curr_min_slot:                       # all durations rounded to 0
+      curr_min_slot = [(cr[0][0], 0)]
+
+    if len(curr_min_slot) > total_expected_min:
       last_task = curr_min_slot[60]
       for i in range(1, 6): 
         curr_min_slot[-1 * i] = last_task
@@ -610,15 +679,17 @@ def run_gpt_prompt_action_sector(action_description,
   prompt = generate_prompt(prompt_input, prompt_template)
 
   fail_safe = get_fail_safe()
-  output = safe_generate_response(prompt, gpt_param, 5, fail_safe,
-                                   __func_validate, __func_clean_up)
+  # Constrain the model to sectors this persona can actually reach.
   y = f"{maze.access_tile(persona.scratch.curr_tile)['world']}"
-  x = [i.strip() for i in persona.s_mem.get_str_accessible_sectors(y).split(",")]
-  if output not in x: 
-    # output = random.choice(x)
-    output = persona.scratch.living_area.split(":")[1]
-
-  print ("DEBUG", random.choice(x), "------", output)
+  sectors = [i.strip() for i in
+             persona.s_mem.get_str_accessible_sectors(y).split(",") if i.strip()]
+  if sectors:
+    output = generate_choice(prompt, sectors, tier="cheap")
+  else:
+    output = safe_generate_response(prompt, gpt_param, 5, fail_safe,
+                                     __func_validate, __func_clean_up)
+    if output not in sectors:
+      output = persona.scratch.living_area.split(":")[1]
 
   if debug or verbose: 
     print_run_prompts(prompt_template, persona, gpt_param, 
@@ -707,13 +778,27 @@ def run_gpt_prompt_action_arena(action_description,
   prompt = generate_prompt(prompt_input, prompt_template)
 
   fail_safe = get_fail_safe()
-  output = safe_generate_response(prompt, gpt_param, 5, fail_safe,
-                                   __func_validate, __func_clean_up)
+  # Constrain the model to arenas that actually exist in this sector (and that
+  # this persona may enter). generate_choice enum-constrains the decode on
+  # Ollama and snaps to the nearest valid arena on any provider, so a
+  # hallucinated arena (e.g. a "kitchen" in an apartment that has none) can
+  # never propagate to execution.
+  arenas = [i.strip() for i in persona.s_mem
+            .get_str_accessible_sector_arenas(f"{act_world}:{act_sector}")
+            .split(",") if i.strip()]
+  valid_arenas = []
+  for a in arenas:
+    if "'s room" in a:
+      if persona.scratch.last_name in a:
+        valid_arenas += [a]
+    else:
+      valid_arenas += [a]
+  if valid_arenas:
+    output = generate_choice(prompt, valid_arenas, tier="cheap")
+  else:
+    output = safe_generate_response(prompt, gpt_param, 5, fail_safe,
+                                     __func_validate, __func_clean_up)
   print (output)
-  # y = f"{act_world}:{act_sector}"
-  # x = [i.strip() for i in persona.s_mem.get_str_accessible_sector_arenas(y).split(",")]
-  # if output not in x: 
-  #   output = random.choice(x)
 
   if debug or verbose: 
     print_run_prompts(prompt_template, persona, gpt_param, 
@@ -766,12 +851,15 @@ def run_gpt_prompt_action_game_object(action_description,
   prompt = generate_prompt(prompt_input, prompt_template)
 
   fail_safe = get_fail_safe()
-  output = safe_generate_response(prompt, gpt_param, 5, fail_safe,
-                                   __func_validate, __func_clean_up)
-
-  x = [i.strip() for i in persona.s_mem.get_str_accessible_arena_game_objects(temp_address).split(",")]
-  if output not in x: 
-    output = random.choice(x)
+  # Constrain the model to objects that actually exist in this arena.
+  objects = [i.strip() for i in persona.s_mem
+             .get_str_accessible_arena_game_objects(temp_address)
+             .split(",") if i.strip()]
+  if objects:
+    output = generate_choice(prompt, objects, tier="cheap")
+  else:
+    output = safe_generate_response(prompt, gpt_param, 5, fail_safe,
+                                     __func_validate, __func_clean_up)
 
   if debug or verbose: 
     print_run_prompts(prompt_template, persona, gpt_param, 

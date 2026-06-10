@@ -1,0 +1,21 @@
+{
+  "name": "The Affair - a secret romance scandal",
+  "description": "A married woman is rumored to be secretly seeing the pub owner. A gossiping witness, a suspicious husband, and a whole town to spread it. Maximum interpersonal drama.",
+  "seeds": {
+    "Jane Moreno": {
+      "currently": "Jane Moreno has been secretly meeting Arthur Burton, growing romantically close to him even though she is married to Tom Moreno. She feels guilty and is being distant and secretive with her family, trying desperately to keep the relationship hidden, and gets flustered and changes the subject whenever Arthur or the pub comes up."
+    },
+    "Arthur Burton": {
+      "currently": "Arthur Burton has been quietly seeing a married woman, Jane Moreno, and is trying to keep it discreet. But he is bad at hiding his feelings, and at the pub he occasionally lets slip remarks about Jane that make people curious."
+    },
+    "Carmen Ortiz": {
+      "currently": "Carmen Ortiz saw Jane Moreno and Arthur Burton together late last night, standing very close and looking secretive. She is convinced something is going on between them and cannot help excitedly sharing this juicy rumor with everyone who comes into the supply store."
+    },
+    "Tom Moreno": {
+      "currently": "Tom Moreno has noticed that his wife, Jane, has been distant, secretive, and often absent lately, and it worries him deeply. He suspects something is wrong and is quietly asking people around town whether they have seen Jane or know what is going on with her."
+    },
+    "Isabella Rodriguez": {
+      "currently": "Isabella Rodriguez has been hearing whispers from her cafe customers that Jane Moreno may be having an affair with Arthur Burton. She is torn between not wanting to spread gossip and feeling that Tom Moreno deserves to know the truth."
+    }
+  }
+}

@@ -76,10 +76,14 @@ class MemoryTree:
       "bedroom, kitchen, dining room, office, bathroom"
     """
     curr_world, curr_sector = sector.split(":")
-    if not curr_sector: 
+    if not curr_sector:
       return ""
-    x = ", ".join(list(self.tree[curr_world][curr_sector].keys()))
-    return x
+    # Defensive: the model can name a sector this persona's tree doesn't have.
+    # Return "" rather than crashing the simulation.
+    try:
+      return ", ".join(list(self.tree[curr_world][curr_sector].keys()))
+    except KeyError:
+      return ""
 
 
   def get_str_accessible_arena_game_objects(self, arena):
@@ -98,14 +102,22 @@ class MemoryTree:
     """
     curr_world, curr_sector, curr_arena = arena.split(":")
 
-    if not curr_arena: 
+    if not curr_arena:
       return ""
 
-    try: 
-      x = ", ".join(list(self.tree[curr_world][curr_sector][curr_arena]))
-    except: 
-      x = ", ".join(list(self.tree[curr_world][curr_sector][curr_arena.lower()]))
-    return x
+    # A weaker (local) model sometimes hallucinates a sector/arena the persona's
+    # spatial tree does not contain -- e.g. a "kitchen" inside an apartment that
+    # only has a "main room". Look it up defensively (exact, then lowercased) and
+    # degrade to "no accessible objects" instead of crashing the simulation; the
+    # caller treats an empty result as "<random>".
+    try:
+      return ", ".join(list(self.tree[curr_world][curr_sector][curr_arena]))
+    except KeyError:
+      pass
+    try:
+      return ", ".join(list(self.tree[curr_world][curr_sector][curr_arena.lower()]))
+    except KeyError:
+      return ""
 
 
 if __name__ == '__main__':

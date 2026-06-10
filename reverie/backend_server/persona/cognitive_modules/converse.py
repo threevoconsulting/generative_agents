@@ -276,7 +276,7 @@ def open_convo_session(persona, convo_mode):
         curr_convo += [[persona.scratch.name, next_line]]
 
 
-  elif convo_mode == "whisper": 
+  elif convo_mode == "whisper":
     whisper = input("Enter Input: ")
     thought = generate_inner_thought(persona, whisper)
 
@@ -286,9 +286,86 @@ def open_convo_session(persona, convo_mode):
     keywords = set([s, p, o])
     thought_poignancy = generate_poig_score(persona, "event", whisper)
     thought_embedding_pair = (thought, get_embedding(thought))
-    persona.a_mem.add_thought(created, expiration, s, p, o, 
-                              thought, keywords, thought_poignancy, 
+    persona.a_mem.add_thought(created, expiration, s, p, o,
+                              thought, keywords, thought_poignancy,
                               thought_embedding_pair, None)
+
+
+def generate_player_response(maze, persona, player_name, player_utterance,
+                             curr_chat):
+  """
+  Generate an agent's reply to a human player's utterance, grounded in the
+  agent's identity and the memories most relevant to the player and to what
+  was just said. Used by player ("play") mode, where one interlocutor is a
+  human rather than another generative agent.
+
+  INPUT:
+    maze: the Maze instance (kept for signature parity).
+    persona: the agent Persona generating the reply.
+    player_name: the human player's in-world name.
+    player_utterance: the player's latest line.
+    curr_chat: list of [speaker, text] for the conversation so far, including
+               the player's latest line.
+  OUTPUT:
+    the agent's reply string.
+  """
+  # Pull the memories most relevant to the player and the current line.
+  focal_points = [player_name, player_utterance]
+  retrieved = new_retrieve(persona, focal_points, 15)
+  memory_lines = []
+  for nodes in retrieved.values():
+    for n in nodes:
+      memory_lines.append(n.embedding_key)
+  memory_str = "\n".join(f"- {m}" for m in memory_lines[:15]) \
+               or "- (nothing in particular)"
+
+  history = ""
+  for speaker, text in curr_chat[-8:]:
+    history += f"{speaker}: {text}\n"
+
+  prompt = (
+      f"{persona.scratch.get_str_iss()}\n\n"
+      f"{persona.scratch.name} is currently {persona.scratch.act_description}.\n"
+      f"Relevant things {persona.scratch.name} remembers:\n{memory_str}\n\n"
+      f"{persona.scratch.name} is having a face-to-face conversation with "
+      f"{player_name}, a fellow resident of the town.\n"
+      f"Conversation so far:\n{history}\n"
+      f"Generate {persona.scratch.name}'s next single spoken line. Stay fully "
+      f"in character. Reply with ONLY the spoken line -- no name prefix, no "
+      f"quotation marks, no stage directions.")
+
+  reply = generate_text(prompt, tier="strong", max_tokens=200,
+                        temperature=0.8).strip()
+  # Defensively strip a leading "Name:" the model may add anyway.
+  prefix = f"{persona.scratch.name}:".lower()
+  if reply.lower().startswith(prefix):
+    reply = reply.split(":", 1)[1].strip()
+  return reply.strip('"').strip()
+
+
+def store_player_conversation(persona, player_name, curr_chat):
+  """
+  Persist a finished player<->agent conversation into the agent's associative
+  memory so the agent remembers having spoken with the player.
+  """
+  if not curr_chat:
+    return
+  convo_str = "\n".join(f"{s}: {t}" for s, t in curr_chat)
+  all_utt = " ".join(t for _, t in curr_chat)
+
+  s = persona.scratch.name
+  p = "chat with"
+  o = player_name
+  desc = f"{s} had a conversation with {o}"
+  keywords = set([s, o])
+  created = persona.scratch.curr_time
+  expiration = persona.scratch.curr_time + datetime.timedelta(days=30)
+
+  poignancy = generate_poig_score(persona, "chat", all_utt)
+  chat_embedding_pair = (desc, get_embedding(convo_str))
+  persona.a_mem.add_chat(created, expiration, s, p, o,
+                         desc, keywords, poignancy,
+                         chat_embedding_pair, curr_chat)
 
 
 

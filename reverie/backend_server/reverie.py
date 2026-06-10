@@ -39,10 +39,40 @@ from persona.persona import *
 #                                  REVERIE                                   #
 ##############################################################################
 
-class ReverieServer: 
-  def __init__(self, 
+def _apply_scenario(sim_folder, scenario):
+  """
+  Seed a story premise into a freshly forked simulation by patching the
+  "currently" (and optional "daily_plan_req") of each named persona, before any
+  persona is loaded. Unknown persona names are skipped with a warning.
+
+  <scenario> is a dict like:
+    {"name": "Break-in at Harvey Oak Supply Store",
+     "seeds": {"Isabella Rodriguez": {"currently": "...", "daily_plan_req": "..."},
+               "Klaus Mueller":      {"currently": "..."}}}
+  """
+  seeds = (scenario or {}).get("seeds", {})
+  print(f"[scenario] applying '{scenario.get('name', 'unnamed')}' "
+        f"to {len(seeds)} persona(s)")
+  for name, patch in seeds.items():
+    f = f"{sim_folder}/personas/{name}/bootstrap_memory/scratch.json"
+    if not os.path.exists(f):
+      print(f"[scenario]   skip unknown persona: {name}")
+      continue
+    with open(f) as fh:
+      scr = json.load(fh)
+    for key in ("currently", "daily_plan_req"):
+      if key in patch and patch[key]:
+        scr[key] = patch[key]
+    with open(f, "w") as fh:
+      json.dump(scr, fh, indent=2)
+    print(f"[scenario]   seeded {name}")
+
+
+class ReverieServer:
+  def __init__(self,
                fork_sim_code,
-               sim_code):
+               sim_code,
+               scenario=None):
     # FORKING FROM A PRIOR SIMULATION:
     # <fork_sim_code> indicates the simulation we are forking from. 
     # Interestingly, all simulations must be forked from some initial 
@@ -56,6 +86,19 @@ class ReverieServer:
     self.sim_code = sim_code
     sim_folder = f"{fs_storage}/{self.sim_code}"
     copyanything(fork_folder, sim_folder)
+
+    # The base simulations ship with an environment/ but no movement/ folder
+    # (git does not track empty directories), so ensure it exists before the
+    # step loop tries to write movement/<step>.json.
+    os.makedirs(f"{sim_folder}/movement", exist_ok=True)
+
+    # SCENARIO SEEDING: optionally plant a premise (a murder, a break-in, a
+    # scandal) into chosen agents before they are loaded, so the town wakes up
+    # already living the story. We patch each seeded persona's "currently"
+    # (and optional "daily_plan_req") -- the same field that drives the bundled
+    # Valentine's-party emergent behavior -- so it propagates through gossip.
+    if scenario:
+      _apply_scenario(sim_folder, scenario)
 
     with open(f"{sim_folder}/reverie/meta.json") as json_file:  
       reverie_meta = json.load(json_file)
@@ -132,9 +175,20 @@ class ReverieServer:
       self.maze.tiles[p_y][p_x]["events"].add(curr_persona.scratch
                                               .get_curr_event_and_desc())
 
-    # REVERIE SETTINGS PARAMETERS:  
+    # PLAYER MODE STATE:
+    # In "play" mode the frontend controls a human player avatar that lives in
+    # the town. The player is projected into the maze each step so agents can
+    # perceive (and converse with) them, but the player is NEVER part of
+    # self.personas and is never given cognition. These track the player's last
+    # known tile so we can clear their stale event before re-stamping it.
+    # In pure simulation mode the frontend simply never sends a "Player" entry
+    # and none of this activates.
+    self.player_name = None
+    self.player_prev_tile = None
+
+    # REVERIE SETTINGS PARAMETERS:
     # <server_sleep> denotes the amount of time that our while loop rests each
-    # cycle; this is to not kill our machine. 
+    # cycle; this is to not kill our machine.
     self.server_sleep = 0.1
 
     # SIGNALING THE FRONTEND SERVER: 
@@ -276,7 +330,69 @@ class ReverieServer:
       time.sleep(self.server_sleep * 10)
 
 
-  def start_server(self, int_counter): 
+  def _handle_player_chat(self, sim_folder):
+    """
+    Handle a pending player->agent chat request (play mode only).
+
+    The frontend (via Django) drops a player_chat.json request into the sim
+    folder when the human player speaks to an agent. We generate the addressed
+    agent's reply and write player_chat_response.json for the frontend to pick
+    up. If the request marks the end of the conversation, the agent commits the
+    exchange to memory so it remembers having spoken with the player.
+
+    This is checked every loop cycle during a run, so it is responsive without
+    requiring the simulation to advance a step.
+    """
+    chat_req_file = f"{sim_folder}/player_chat.json"
+    if not check_if_file_exists(chat_req_file):
+      return
+    try:
+      with open(chat_req_file) as f:
+        req = json.load(f)
+      os.remove(chat_req_file)
+    except:
+      return
+
+    target = req.get("target", "")
+    player_name = req.get("player_name", "Player")
+    utterance = req.get("utterance", "")
+    history = req.get("history", [])
+    if target not in self.personas:
+      return
+    persona = self.personas[target]
+
+    # An "end" with no utterance just closes the conversation: let the agent
+    # commit it to memory so it remembers having spoken with the player.
+    if not utterance:
+      if req.get("end"):
+        try:
+          persona.remember_player_conversation(player_name, history)
+        except:
+          traceback.print_exc()
+      return
+
+    history = history + [[player_name, utterance]]
+    try:
+      reply = persona.respond_to_player(self.maze, player_name, utterance,
+                                        history)
+    except:
+      traceback.print_exc()
+      reply = "..."
+    history = history + [[target, reply]]
+
+    resp = {"target": target, "player_name": player_name,
+            "reply": reply, "history": history}
+    with open(f"{sim_folder}/player_chat_response.json", "w") as outfile:
+      outfile.write(json.dumps(resp, indent=2))
+
+    if req.get("end"):
+      try:
+        persona.remember_player_conversation(player_name, history)
+      except:
+        traceback.print_exc()
+
+
+  def start_server(self, int_counter):
     """
     The main backend server of Reverie. 
     This function retrieves the environment file from the frontend to 
@@ -304,9 +420,13 @@ class ReverieServer:
 
     # The main while loop of Reverie. 
     while (True): 
-      # Done with this iteration if <int_counter> reaches 0. 
-      if int_counter == 0: 
+      # Done with this iteration if <int_counter> reaches 0.
+      if int_counter == 0:
         break
+
+      # PLAYER MODE: service any pending player->agent chat each cycle. This is
+      # a no-op (single cheap file existence check) in pure simulation mode.
+      self._handle_player_chat(sim_folder)
 
       # <curr_env_file> file is the file that our frontend outputs. When the
       # frontend has done its job and moved the personas, then it will put a 
@@ -316,12 +436,14 @@ class ReverieServer:
       if check_if_file_exists(curr_env_file):
         # If we have an environment file, it means we have a new perception
         # input to our personas. So we first retrieve it.
-        try: 
+        try:
           # Try and save block for robustness of the while loop.
           with open(curr_env_file) as json_file:
             new_env = json.load(json_file)
             env_retrieved = True
-        except: 
+        except Exception:
+          # Catch only real errors here -- NOT KeyboardInterrupt -- so that a
+          # Ctrl+C is never swallowed and always pauses the run cleanly.
           pass
       
         if env_retrieved: 
@@ -364,10 +486,26 @@ class ReverieServer:
                        None, None, None)
               self.maze.remove_event_from_tile(blank, new_tile)
 
+          # PLAYER MODE: project the human player onto the maze so that agents
+          # perceive them as a fellow resident. The player is controlled
+          # entirely by the frontend and is never part of self.personas, so we
+          # only stamp/clear their event here and never call move() on them.
+          if "Player" in new_env:
+            player = new_env["Player"]
+            self.player_name = player.get("name", "Player")
+            new_player_tile = (player["x"], player["y"])
+            player_desc = player.get("description", "exploring the town")
+            player_event = (self.player_name, "is", player_desc, player_desc)
+            if self.player_prev_tile is not None:
+              self.maze.remove_subject_events_from_tile(
+                  self.player_name, self.player_prev_tile)
+            self.maze.add_event_from_tile(player_event, new_player_tile)
+            self.player_prev_tile = new_player_tile
+
           # Then we need to actually have each of the personas perceive and
           # move. The movement for each of the personas comes in the form of
           # x y coordinates where the persona will move towards. e.g., (50, 34)
-          # This is where the core brains of the personas are invoked. 
+          # This is where the core brains of the personas are invoked.
           movements = {"persona": dict(), 
                        "meta": dict()}
           for persona_name, persona in self.personas.items(): 
@@ -385,8 +523,14 @@ class ReverieServer:
             movements["persona"][persona_name]["description"] = description
             movements["persona"][persona_name]["chat"] = (persona
                                                           .scratch.chat)
+            # Geometry of the game object the persona is currently on (e.g. the
+            # bed), so the frontend can place/orient them on the real object
+            # rather than guessing. None while travelling (path tiles have no
+            # game object).
+            movements["persona"][persona_name]["object_pose"] = (
+                self.maze.get_game_object_pose(next_tile))
 
-          # Include the meta information about the current stage in the 
+          # Include the meta information about the current stage in the
           # movements dictionary. 
           movements["meta"]["curr_time"] = (self.curr_time 
                                              .strftime("%B %d, %Y, %H:%M:%S"))
@@ -398,7 +542,8 @@ class ReverieServer:
           #  "persona": {"Klaus Mueller": {"movement": [38, 12]}}, 
           #  "meta": {curr_time: <datetime>}}
           curr_move_file = f"{sim_folder}/movement/{self.step}.json"
-          with open(curr_move_file, "w") as outfile: 
+          os.makedirs(os.path.dirname(curr_move_file), exist_ok=True)
+          with open(curr_move_file, "w") as outfile:
             outfile.write(json.dumps(movements, indent=2))
 
           # After this cycle, the world takes one step forward, and the 
@@ -449,23 +594,41 @@ class ReverieServer:
           shutil.rmtree(sim_folder) 
           self.start_path_tester_server()
 
-        elif sim_command.lower() == "exit": 
-          # Finishes the simulation environment but does not save the progress
-          # and erases all saved data from current simulation. 
-          # Example: exit 
-          shutil.rmtree(sim_folder) 
-          break 
+        elif sim_command.lower() == "exit":
+          # Leaves the simulation WITHOUT deleting it. The run folder (and every
+          # movement file written so far) is kept, so the run can be replayed or
+          # resumed later. Use "fin" to also save final persona state, or
+          # "delete" to actually erase the run.
+          print(f"Exited. Run '{self.sim_code}' kept on disk "
+                f"(replay it, or resume by forking it). Use 'delete' to erase.")
+          break
 
-        elif sim_command.lower() == "save": 
+        elif sim_command.lower() == "delete":
+          # Explicitly erase all saved data for the current simulation.
+          # This is the (now opt-in) destructive action that "exit" used to do.
+          # Example: delete
+          shutil.rmtree(sim_folder)
+          print(f"Deleted run '{self.sim_code}'.")
+          break
+
+        elif sim_command.lower() == "save":
           # Saves the current simulation progress. 
           # Example: save
           self.save()
 
-        elif sim_command[:3].lower() == "run": 
+        elif sim_command[:3].lower() == "run":
           # Runs the number of steps specified in the prompt.
           # Example: run 1000
           int_count = int(sim_command.split()[-1])
-          rs.start_server(int_count)
+          try:
+            rs.start_server(int_count)
+          except KeyboardInterrupt:
+            # Ctrl+C during a run: stop cleanly and return to the menu instead
+            # of dumping a scary traceback. Every completed step is already
+            # written to disk, so nothing is lost.
+            print(f"\n⏸  Run paused at step {self.step}. Completed steps are "
+                  f"saved on disk.\n   Type 'fin' to save & quit, 'exit' to "
+                  f"quit (keeps the run), or 'run N' to continue.")
 
         elif ("print persona schedule" 
               in sim_command[:22].lower()): 
@@ -599,16 +762,86 @@ class ReverieServer:
 
 
 if __name__ == '__main__':
-  # rs = ReverieServer("base_the_ville_isabella_maria_klaus", 
+  # rs = ReverieServer("base_the_ville_isabella_maria_klaus",
   #                    "July1_the_ville_isabella_maria_klaus-step-3-1")
-  # rs = ReverieServer("July1_the_ville_isabella_maria_klaus-step-3-20", 
+  # rs = ReverieServer("July1_the_ville_isabella_maria_klaus-step-3-20",
   #                    "July1_the_ville_isabella_maria_klaus-step-3-21")
   # rs.open_server()
 
-  origin = input("Enter the name of the forked simulation: ").strip()
-  target = input("Enter the name of the new simulation: ").strip()
+  # Friendly labels for the bundled base simulations so you can pick "3 agents"
+  # or "25 agents" instead of remembering the long folder name.
+  FRIENDLY = {
+      "base_the_ville_isabella_maria_klaus": "3 agents  (Isabella, Maria, Klaus)",
+      "base_the_ville_n25": "25 agents (the full town)",
+  }
 
-  rs = ReverieServer(origin, target)
+  # Discover what we can fork from: base_* (fresh starts) first, then any other
+  # saved simulations (to resume from where you left off).
+  all_sims = sorted(d for d in os.listdir(fs_storage)
+                    if os.path.isdir(f"{fs_storage}/{d}") and not d.startswith("."))
+  bases = [s for s in all_sims if s.startswith("base_")]
+  saved = [s for s in all_sims if not s.startswith("base_")]
+  menu = bases + saved
+
+  print()
+  print("=" * 62)
+  print("  Start a simulation -- pick what to fork from:")
+  print("=" * 62)
+  print("  Fresh start:")
+  for i, s in enumerate(bases):
+    print(f"     [{i}]  {FRIENDLY.get(s, s)}")
+  if saved:
+    print("  Resume a saved run:")
+    for i, s in enumerate(saved, start=len(bases)):
+      print(f"     [{i}]  {s}")
+  print("-" * 62)
+
+  choice = input("  Choose a number (or type a name) [0]: ").strip()
+  if choice == "" and menu:
+    origin = menu[0]
+  elif choice.isdigit() and int(choice) < len(menu):
+    origin = menu[int(choice)]
+  else:
+    origin = choice  # allow typing an exact name, as before
+
+  # Suggest a unique run name; just press Enter to accept it. Guaranteeing
+  # uniqueness avoids the classic "reused a name -> weird/stuck run" trap.
+  default_target = datetime.datetime.now().strftime("run-%b%d-%H%M").lower()
+  target = input(f"  Name this run [{default_target}]: ").strip() or default_target
+  while os.path.isdir(f"{fs_storage}/{target}"):
+    target += "-1"
+
+  # Optional: seed a story premise (murder, break-in, scandal...). Scenario
+  # files live in ./scenarios/*.json. Press Enter for a normal run.
+  scenario = None
+  scen_dir = "scenarios"
+  scen_files = (sorted(f for f in os.listdir(scen_dir) if f.endswith(".json"))
+                if os.path.isdir(scen_dir) else [])
+  if scen_files:
+    print()
+    print("  Apply a scenario? (Enter = none)")
+    for i, f in enumerate(scen_files):
+      try:
+        nm = json.load(open(f"{scen_dir}/{f}")).get("name", f)
+      except Exception:
+        nm = f
+      print(f"     [{i}]  {nm}")
+    sc = input("  Scenario number [none]: ").strip()
+    if sc.isdigit() and int(sc) < len(scen_files):
+      scenario = json.load(open(f"{scen_dir}/{scen_files[int(sc)]}"))
+
+  print()
+  print(f"  Forking '{origin}'  ->  '{target}'"
+        + (f"   [scenario: {scenario['name']}]" if scenario else ""))
+  print("  When it reaches 'Enter option:', open ONE of these in your browser:")
+  print("     View mode:  http://localhost:8000/simulator_home")
+  print("     Play mode:  http://localhost:8000/simulator_play?name=Alex")
+  print("  ...then type e.g.  run 2200   (for an overnight run, try run 8000+)")
+  print("  Commands: run N | save (checkpoint) | fin (save & quit) | "
+        "exit (quit, keeps run) | delete (quit & erase)")
+  print()
+
+  rs = ReverieServer(origin, target, scenario=scenario)
   rs.open_server()
 
 

@@ -1,0 +1,27 @@
+{
+  "name": "The Cheating Scandal at Oak Hill College",
+  "description": "A student cheated on a major exam. A witness is torn; the professor investigating is unknowingly the cheater's own mother; his father is proudly bragging about the grade; and an innocent student is being wrongly blamed. Maximum dramatic irony, spreading through the college and the cafe.",
+  "seeds": {
+    "Eddy Lin": {
+      "currently": "Eddy Lin secretly cheated on an important exam at Oak Hill College. He is terrified of being caught -- especially because his mother, Mei Lin, is a professor there and his father, John Lin, is so proud of him. He acts normal and deflects or downplays things whenever the exam or cheating comes up, and the guilt is eating at him."
+    },
+    "Maria Lopez": {
+      "currently": "Maria Lopez saw Eddy Lin cheating during the big exam. She is torn about whether to report it or stay quiet, and she cautiously confides what she saw to a few people she trusts to get their advice on what she should do."
+    },
+    "Mei Lin": {
+      "currently": "Mei Lin, a professor at Oak Hill College, is convinced someone cheated on the recent exam because several students' answers were suspiciously identical. She is determined to find out who did it, questioning students and colleagues -- never imagining that the culprit could be her own son, Eddy."
+    },
+    "John Lin": {
+      "currently": "John Lin is bursting with pride because his son Eddy supposedly did brilliantly on a hard exam at Oak Hill College. He has been cheerfully telling his customers and everyone he meets how hard Eddy studied and how well he did -- completely unaware that Eddy actually cheated."
+    },
+    "Klaus Mueller": {
+      "currently": "Klaus Mueller has heard that people are whispering that HE is the one who cheated on the exam, even though he did absolutely nothing wrong. He is upset and defensive about the unfair suspicion and earnestly tries to clear his name with everyone he talks to."
+    },
+    "Ayesha Khan": {
+      "currently": "Ayesha Khan, a fellow Oak Hill student, has heard the swirling rumors that someone cheated on the big exam and that Klaus might be to blame. She doesn't believe Klaus would do it and is curious and a little anxious, asking around to try to figure out what really happened."
+    },
+    "Isabella Rodriguez": {
+      "currently": "Isabella Rodriguez has noticed the Oak Hill College students who frequent Hobbs Cafe are buzzing about a cheating scandal on a recent exam. She keeps overhearing fragments of the gossip and finds herself drawn into the talk, wondering who really did it."
+    }
+  }
+}

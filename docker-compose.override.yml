@@ -1,0 +1,40 @@
+# LOCAL DEV ONLY -- Docker Compose automatically merges this file on top of
+# docker-compose.yml when you run `docker compose` in this directory.
+#
+# It bind-mounts the backend source into the container so code changes (e.g.
+# after `git pull`) take effect by just restarting reverie.py -- no image
+# rebuild needed. This file is NOT used on the NAS (there you paste only
+# docker-compose.yml into Portainer), so it never affects the deployment.
+#
+# PREREQUISITE: mounting ./reverie hides the utils.py that the Dockerfile
+# generates at build time, so create it once in your clone (it is gitignored):
+#
+#   cp reverie/backend_server/utils.docker.py reverie/backend_server/utils.py
+
+services:
+  generative-agents:
+    volumes:
+      - ./reverie:/app/reverie
+
+    # --- Run against a LOCAL model via Ollama (no API key, no cost) ----------
+    # Ollama runs on your HOST machine, not in this container. To use it:
+    #   1) On the host, start Ollama listening on all interfaces and pull a model:
+    #        OLLAMA_HOST=0.0.0.0:11434 ollama serve      # in one terminal
+    #        ollama pull qwen2.5:14b-instruct            # in another
+    #   2) Uncomment the `environment:` block below, then `docker compose up -d`.
+    # (Leave it commented to keep using Claude, as configured in the base file.)
+    #
+    # environment:
+    #   LLM_PROVIDER: "ollama"
+    #   # The container reaches the host's Ollama at host.docker.internal. NB:
+    #   # this app config var coincidentally shares Ollama's own server-bind var
+    #   # name -- here it is the CLIENT url the container dials.
+    #   OLLAMA_HOST: "http://host.docker.internal:11434"
+    #   OLLAMA_MODEL_CHEAP: "qwen2.5:14b-instruct"
+    #   OLLAMA_MODEL_STRONG: "qwen2.5:14b-instruct"   # bump to qwen2.5:32b-instruct for better chat
+    #   OLLAMA_NUM_CTX: "8192"
+
+    # Makes `host.docker.internal` resolve on Linux hosts. Docker Desktop on
+    # Mac/Windows already provides it; this line is harmless there.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

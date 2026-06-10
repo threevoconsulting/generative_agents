@@ -12,7 +12,27 @@ from global_methods import *
 from path_finder import *
 from utils import *
 
-def execute(persona, maze, personas, plan): 
+
+def _resolve_address_tiles(plan, maze, persona):
+  """
+  Return the set of tiles for the action address <plan>. If the model named a
+  place that doesn't exist (e.g. a "kitchen" arena in an apartment that has
+  none), degrade to a less-specific address that does exist (drop arena ->
+  sector -> world). As a last resort keep the persona where they are, so a
+  hallucinated location can never crash the simulation.
+  """
+  if plan in maze.address_tiles:
+    return maze.address_tiles[plan]
+  parts = plan.split(":")
+  while len(parts) > 1:
+    parts = parts[:-1]
+    key = ":".join(parts)
+    if key in maze.address_tiles:
+      return maze.address_tiles[key]
+  return {tuple(persona.scratch.curr_tile)}
+
+
+def execute(persona, maze, personas, plan):
   """
   Given a plan (action's string address), we execute the plan (actually 
   outputs the tile coordinate path and the next coordinate for the 
@@ -76,22 +96,20 @@ def execute(persona, maze, personas, plan):
       y = int(plan.split()[2])
       target_tiles = [[x, y]]
 
-    elif "<random>" in plan: 
+    elif "<random>" in plan:
       # Executing a random location action.
       plan = ":".join(plan.split(":")[:-1])
-      target_tiles = maze.address_tiles[plan]
+      target_tiles = _resolve_address_tiles(plan, maze, persona)
       target_tiles = random.sample(list(target_tiles), 1)
 
-    else: 
+    else:
       # This is our default execution. We simply take the persona to the
-      # location where the current action is taking place. 
+      # location where the current action is taking place.
       # Retrieve the target addresses. Again, plan is an action address in its
-      # string form. <maze.address_tiles> takes this and returns candidate 
-      # coordinates. 
-      if plan not in maze.address_tiles: 
-        maze.address_tiles["Johnson Park:park:park garden"] #ERRORRRRRRR
-      else: 
-        target_tiles = maze.address_tiles[plan]
+      # string form. <maze.address_tiles> takes this and returns candidate
+      # coordinates. Resolve defensively so a hallucinated address degrades to
+      # a valid one instead of crashing.
+      target_tiles = _resolve_address_tiles(plan, maze, persona)
 
     # There are sometimes more than one tile returned from this (e.g., a tabe
     # may stretch many coordinates). So, we sample a few here. And from that 

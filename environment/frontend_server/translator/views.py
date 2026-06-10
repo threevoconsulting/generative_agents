@@ -114,10 +114,15 @@ def home(request):
   with open(f_curr_sim_code) as json_file:  
     sim_code = json.load(json_file)["sim_code"]
   
-  with open(f_curr_step) as json_file:  
+  with open(f_curr_step) as json_file:
     step = json.load(json_file)["step"]
 
-  os.remove(f_curr_step)
+  # NOTE: we intentionally do NOT delete curr_step.json here. The original code
+  # treated it as a single-use token, so reloading /simulator_home (or opening
+  # it a moment too late) showed "Please start the backend first" and the game
+  # loop never started -- leaving the backend blocked forever waiting for the
+  # frontend. Keeping the file lets the page be (re)loaded any time the backend
+  # is running.
 
   persona_names = []
   persona_names_set = set()
@@ -312,6 +317,102 @@ def path_tester_update(request):
     outfile.write(json.dumps(camera, indent=2))
 
   return HttpResponse("received")
+
+
+def play(request):
+  """
+  Play mode: identical to the live simulator (home), but renders a controllable
+  human player avatar that lives in the town. Reuses the same backend handshake
+  (the backend projects the player into the world when it sees a "Player" entry
+  in the environment file). The optional ?name= query sets the player's name.
+  """
+  f_curr_sim_code = "temp_storage/curr_sim_code.json"
+  f_curr_step = "temp_storage/curr_step.json"
+
+  if not check_if_file_exists(f_curr_step):
+    return render(request, "home/error_start_backend.html", {})
+
+  with open(f_curr_sim_code) as json_file:
+    sim_code = json.load(json_file)["sim_code"]
+  with open(f_curr_step) as json_file:
+    step = json.load(json_file)["step"]
+  # NOTE: do NOT delete curr_step.json here. Like home(), this page must be
+  # reloadable while the backend is running -- deleting it would make a reload
+  # show "Please start the backend first" and leave the backend waiting forever.
+
+  persona_names = []
+  persona_names_set = set()
+  for i in find_filenames(f"storage/{sim_code}/personas", ""):
+    x = i.split("/")[-1].strip()
+    if x[0] != ".":
+      persona_names += [[x, x.replace(" ", "_")]]
+      persona_names_set.add(x)
+
+  persona_init_pos = []
+  file_count = []
+  for i in find_filenames(f"storage/{sim_code}/environment", ".json"):
+    x = i.split("/")[-1].strip()
+    if x[0] != ".":
+      file_count += [int(x.split(".")[0])]
+  curr_json = f'storage/{sim_code}/environment/{str(max(file_count))}.json'
+  with open(curr_json) as json_file:
+    persona_init_pos_dict = json.load(json_file)
+    for key, val in persona_init_pos_dict.items():
+      if key in persona_names_set:
+        persona_init_pos += [[key, val["x"], val["y"]]]
+
+  # Spawn the player on a known-walkable tile -- the first agent's tile is a
+  # safe default (agents only stand on walkable tiles).
+  if persona_init_pos:
+    player_init_x, player_init_y = persona_init_pos[0][1], persona_init_pos[0][2]
+  else:
+    player_init_x, player_init_y = 72, 14
+
+  context = {"sim_code": sim_code,
+             "step": step,
+             "persona_names": persona_names,
+             "persona_init_pos": persona_init_pos,
+             "player_name": request.GET.get("name", "Tourist"),
+             "player_init_x": player_init_x,
+             "player_init_y": player_init_y,
+             "mode": "play"}
+  return render(request, "home/home.html", context)
+
+
+def player_chat(request):
+  """
+  <FRONTEND to BACKEND> Drop a player->agent chat request for the backend's
+  run loop to service. The backend writes player_chat_response.json in reply.
+  """
+  data = json.loads(request.body)
+  sim_code = data["sim_code"]
+  payload = {"target": data["target"],
+             "player_name": data.get("player_name", "Player"),
+             "utterance": data.get("utterance", ""),
+             "history": data.get("history", []),
+             "end": data.get("end", False)}
+  with open(f"storage/{sim_code}/player_chat.json", "w") as outfile:
+    outfile.write(json.dumps(payload, indent=2))
+  return HttpResponse("received")
+
+
+def player_chat_response(request):
+  """
+  <BACKEND to FRONTEND> Return (and consume) the agent's reply to the player,
+  if the backend has produced one yet.
+  """
+  data = json.loads(request.body)
+  sim_code = data["sim_code"]
+  resp_file = f"storage/{sim_code}/player_chat_response.json"
+
+  response_data = {"ready": False}
+  if check_if_file_exists(resp_file):
+    with open(resp_file) as json_file:
+      response_data = json.load(json_file)
+    response_data["ready"] = True
+    os.remove(resp_file)
+
+  return JsonResponse(response_data)
 
 
 

@@ -44,10 +44,23 @@
 	// Phaser 3.0 global settings. 
 	// Configuration meant to be passed to the main Phaser game instance. 
 	const config = {
-	  type: Phaser.AUTO,
-	  width: 1500,
-	  height: 800,
-	  parent: "game-container",
+	  // Use CANVAS, not Phaser.AUTO (which prefers WebGL). The interior tilesets
+	  // are ~10,000px tall, which exceeds the 8192px max texture size on many
+	  // GPUs; under WebGL those oversized textures fail to upload and the
+	  // building interiors render as black blocks (outdoor 512x512 tilesets are
+	  // unaffected). The Canvas renderer has no max-texture-size limit, so the
+	  // interiors paint correctly on any GPU. (Maps are static here, so the
+	  // small perf cost of Canvas vs WebGL is irrelevant.)
+	  type: Phaser.CANVAS,
+	  // Responsive scaling: the game renders at a fixed 1500x800 design
+	  // resolution and is scaled to FIT the parent container (preserving aspect
+	  // ratio and centering), so it adapts to phones, tablets and desktops.
+	  scale: {
+	    mode: Phaser.Scale.FIT,
+	    autoCenter: Phaser.Scale.CENTER_BOTH,
+	    parent: "game-container",
+	    width: 1500,
+	    height: 800 },
 	  pixelArt: true,
 	  physics: {
 	    default: "arcade",
@@ -101,8 +114,81 @@
 
 	let curr_maze = "the_ville";
 
+	// *** PLAY MODE ***
+	// In "play" mode the <player> sprite becomes a visible, collidable, human-
+	// controlled resident whose tile position is reported to the backend so the
+	// agents perceive (and can converse with) them. In every other mode the
+	// <player> sprite is just the invisible camera anchor it has always been.
+	let PLAY_MODE = {% if mode == "play" %}true{% else %}false{% endif %};
+	let player_name = "{{ player_name|default:'You'|escapejs }}";
+	let player_spawn_tile = [{{ player_init_x|default:72 }}, {{ player_init_y|default:14 }}];
+
+	// *** REAL-TIME TRANSPORT ***
+	// Try a WebSocket to the backend bridge; if it is unavailable (Channels not
+	// installed/misconfigured) we transparently fall back to the original XHR
+	// polling. The WebSocket lets the server *push* movement and chat replies
+	// the instant they are ready, instead of the browser polling every frame.
+	let sim_ws = null;
+	let USE_WS = false;
+	let ws_awaiting_movement = false;
+	function wsReady() { return USE_WS && sim_ws && sim_ws.readyState === 1; }
+	(function initSimWS() {
+	  try {
+	    let proto = (location.protocol === "https:") ? "wss:" : "ws:";
+	    sim_ws = new WebSocket(proto + "//" + location.host + "/ws/sim/");
+	    sim_ws.onopen = function () { USE_WS = true; console.log("[sim] WebSocket connected"); };
+	    sim_ws.onclose = function () { USE_WS = false; };
+	    sim_ws.onerror = function () { USE_WS = false; };
+	    sim_ws.onmessage = function (e) {
+	      let msg = JSON.parse(e.data);
+	      if (msg.action === "movement") {
+	        if (msg["<step>"] == step) {
+	          execute_movement = msg;
+	          ws_awaiting_movement = false;
+	          phase = "execute";
+	        }
+	      } else if (msg.action === "player_chat_response") {
+	        if (typeof window.onPlayerChatResponse === "function") {
+	          window.onPlayerChatResponse(msg);
+	        }
+	      }
+	    };
+	  } catch (err) { USE_WS = false; }
+	})();
+	// Lets play_controls.html send chat over the WebSocket when one is open.
+	window.simSendChat = function (payload) {
+	  if (wsReady()) {
+	    payload.action = "player_chat";
+	    sim_ws.send(JSON.stringify(payload));
+	    return true;
+	  }
+	  return false;
+	};
+
+	// Tiny transport indicator: green dot = live WebSocket, grey = polling.
+	(function () {
+	  let dot = document.createElement("div");
+	  dot.id = "ws-status-dot";
+	  dot.style.cssText = "position:fixed; top:8px; right:8px; width:12px;" +
+	    " height:12px; border-radius:50%; background:#bbb; z-index:2000;" +
+	    " box-shadow:0 0 4px rgba(0,0,0,0.4);";
+	  document.body.appendChild(dot);
+	  setInterval(function () {
+	    if (wsReady()) { dot.style.background = "#2ecc40"; dot.title = "Live (WebSocket)"; }
+	    else { dot.style.background = "#bbb"; dot.title = "Polling (no WebSocket)"; }
+	  }, 500);
+	})();
+
 	// <tile_width> is the width of one individual tile (tiles are square)
 	let tile_width = 32;
+	// While sleeping, rotate the idle sprite to lie along the bed's long axis
+	// (using object_pose from the backend). Set to false to keep agents upright.
+	let GROUND_SLEEP = true;
+	// Conversation bubbles: how long (ms) each line of dialogue stays up before
+	// the next line is revealed, plus a per-conversation progress tracker so the
+	// reveal is paced across the conversation instead of dumping all lines at once.
+	let CHAT_LINE_MS = 2800;
+	let convoProgress = {};
 	// Important: tile_width % movement_speed has to be 0. 
 	// <movement_speed> determines how fast we move at each upate cylce. 
 	let movement_speed = 32; 
@@ -177,12 +263,22 @@
 	  // see: https://labs.phaser.io/view.html?src=src/animation/single%20sprite%20sheet.js
 	  // Joon: Technically, I think this guy had the best tutorial for atlas: 
 	  //       https://www.youtube.com/watch?v=fdXcD9X4NrQ&ab_channel=MorganPage
-	  this.load.atlas("atlas", 
-	                  "https://mikewesthad.github.io/phaser-3-tilemap-blog-posts/post-1/assets/atlas/atlas.png", 
+	  this.load.atlas("atlas",
+	                  "https://mikewesthad.github.io/phaser-3-tilemap-blog-posts/post-1/assets/atlas/atlas.png",
 	                  "https://mikewesthad.github.io/phaser-3-tilemap-blog-posts/post-1/assets/atlas/atlas.json");
+
+	  // Per-character sprite sheets: each agent gets their own look. Every sheet
+	  // (Isabella_Rodriguez.png, etc.) shares the same frame layout defined in
+	  // assets/characters/atlas.json. We key each atlas by the persona's name.
+	  var char_json = "{% static 'assets/characters/atlas.json' %}";
+	  var char_base = char_json.replace("atlas.json", "");
+	  for (var pkey in persona_names) {
+	    this.load.atlas(pkey, char_base + pkey.replace(/ /g, "_") + ".png",
+	                    char_json);
+	  }
 	}
 
-	function create() {  
+	function create() {
 	  const map = this.make.tilemap({ key: "map" });
 	  // Joon: Logging map is really helpful for debugging here: 
 	  //       console.log(map);
@@ -265,16 +361,71 @@
 	  // OLD NOTE: Create a sprite with physics enabled via the physics system. 
 	  // The image  used for the sprite has a bit of whitespace, so I'm using 
 	  // setSize & setOffset to control the size of the player's body.
+	  // In play mode spawn the player on a known-walkable tile and make them a
+	  // visible, collidable character; otherwise keep the historic invisible
+	  // camera-anchor behaviour (depth -1, passes through collisions).
+	  let player_start_x = PLAY_MODE ? player_spawn_tile[0] * tile_width + tile_width / 2 : 800;
+	  let player_start_y = PLAY_MODE ? player_spawn_tile[1] * tile_width + tile_width : 288;
 	  player = this.physics.add.
-	                sprite(800, 288, "atlas", "misa-front").
+	                sprite(player_start_x, player_start_y, "atlas", "misa-front").
 	                setSize(30, 40).
 	                setOffset(0, 0);
-	  player.setDepth(-1);
-	  // Setting up the camera. 
+	  if (PLAY_MODE) {
+	    player.setDepth(1);
+	    this.physics.add.collider(player, collisionsLayer);
+	  } else {
+	    player.setDepth(-1);
+	  }
+	  // Setting up the camera.
 	  const camera = this.cameras.main;
 	  camera.startFollow(player);
 	  camera.setBounds(0, 0, map.widthInPixels, map.heightInPixels);
 	  cursors = this.input.keyboard.createCursorKeys();
+	  // Expose the camera so the on-screen touch zoom buttons can drive it.
+	  window.game_camera = camera;
+
+	  // *** FOCUS MODE ***
+	  // Follow a chosen agent ("through their eyes"), switchable live while you
+	  // watch. unfocus() returns to the free-roam camera (the invisible player
+	  // sprite that the arrow keys pan in view/replay mode).
+	  window.focused_persona = null;
+	  window.focusPersona = function (name) {
+	    if (personas[name]) {
+	      camera.startFollow(personas[name]);
+	      camera.setZoom(Math.max(camera.zoom, 1.6));
+	      window.focused_persona = name;
+	      if (window.onFocusChange) window.onFocusChange(name);
+	    }
+	  };
+	  window.unfocus = function () {
+	    camera.startFollow(player);
+	    window.focused_persona = null;
+	    if (window.onFocusChange) window.onFocusChange(null);
+	  };
+
+	  // *** TOUCH GESTURES ***
+	  // Pinch-to-zoom works in every mode. Drag-to-pan is enabled only outside
+	  // play mode -- in play mode a drag must not drag your own avatar around.
+	  this.input.addPointer(2);
+	  let pinch_prev_dist = 0;
+	  this.input.on('pointermove', function (pointer) {
+	    let p1 = this.input.pointer1, p2 = this.input.pointer2;
+	    if (p1.isDown && p2.isDown) {
+	      let dist = Phaser.Math.Distance.Between(p1.x, p1.y, p2.x, p2.y);
+	      if (pinch_prev_dist > 0) {
+	        camera.setZoom(Math.max(0.2, Math.min(3,
+	                        camera.zoom * (dist / pinch_prev_dist))));
+	      }
+	      pinch_prev_dist = dist;
+	      return;
+	    }
+	    pinch_prev_dist = 0;
+	    if (!PLAY_MODE && pointer.isDown) {
+	      player.x -= (pointer.x - pointer.prevPosition.x) / camera.zoom;
+	      player.y -= (pointer.y - pointer.prevPosition.y) / camera.zoom;
+	    }
+	  }, this);
+	  this.input.on('pointerup', function () { pinch_prev_dist = 0; }, this);
 
 	  // *** SET UP PERSONAS *** 
 	  // We start by creating the game sprite objects. 
@@ -282,10 +433,12 @@
 	    let persona_name = Object.keys(spawn_tile_loc)[i];
 	    let start_pos = [spawn_tile_loc[persona_name][0] * tile_width + tile_width / 2, 
 	                     spawn_tile_loc[persona_name][1] * tile_width + tile_width];
+	    // Each persona renders from their own loaded atlas (keyed by name), so
+	    // they look like themselves instead of all sharing the Misa sprite.
 	    let new_sprite = this.physics.add
-	                         .sprite(start_pos[0], start_pos[1], "atlas", "misa-front")
+	                         .sprite(start_pos[0], start_pos[1], persona_name, "down")
 	                         .setSize(30, 40)
-	                         .setOffset(0, 32); // DEBUG 1 --- I added 32 offset on Dec 29. 
+	                         .setOffset(0, 32); // DEBUG 1 --- I added 32 offset on Dec 29.
 	    // Here, we are creating the persona and its pronunciatio sprites.
 	    personas[persona_name] = new_sprite;
 	    pronunciatios[persona_name] = this.add.text(
@@ -326,6 +479,19 @@
 	    frames: anims.generateFrameNames("atlas", { prefix: "misa-back-walk.", start: 0, end: 3, zeroPad: 3 }),
 	    frameRate: 4,
 	    repeat: -1 });
+
+	  // Per-character walking animations (down/left/right/up) built from each
+	  // agent's own atlas, keyed "<Persona Name>-<dir>-walk".
+	  for (var pkey in persona_names) {
+	    ["down", "left", "right", "up"].forEach(function (dir) {
+	      anims.create({
+	        key: pkey + "-" + dir + "-walk",
+	        frames: anims.generateFrameNames(pkey,
+	                  { prefix: dir + "-walk.", start: 0, end: 3, zeroPad: 3 }),
+	        frameRate: 4,
+	        repeat: -1 });
+	    });
+	  }
 	}
 
 
@@ -349,20 +515,36 @@
 	  // This is where we finish up the camera setting we started in the create() 
 	  // function. We set the movement speed of the camera and wire up the keys to
 	  // map to the actual movement.
-	  const camera_speed = 400;
+	  // Walking pace in play mode, faster free-fly pan otherwise.
+	  const camera_speed = PLAY_MODE ? 160 : 400;
 	  // Stop any previous movement from the last frame
 	  player.body.setVelocity(0);
-	  if (cursors.left.isDown) {
+	  // Combine keyboard arrows with the on-screen touch D-pad (mobile).
+	  let ts = window.touch_state || {};
+	  let player_move_dir = "";
+	  if (cursors.left.isDown || ts.left) {
 	    player.body.setVelocityX(-camera_speed);
-	  } 
-	  if (cursors.right.isDown) {
+	    player_move_dir = "l";
+	  }
+	  if (cursors.right.isDown || ts.right) {
 	    player.body.setVelocityX(camera_speed);
-	  } 
-	  if (cursors.up.isDown) {
+	    player_move_dir = "r";
+	  }
+	  if (cursors.up.isDown || ts.up) {
 	    player.body.setVelocityY(-camera_speed);
-	  } 
-	  if (cursors.down.isDown) {
+	    player_move_dir = "u";
+	  }
+	  if (cursors.down.isDown || ts.down) {
 	    player.body.setVelocityY(camera_speed);
+	    player_move_dir = "d";
+	  }
+	  // Animate the player's avatar in play mode.
+	  if (PLAY_MODE) {
+	    if (player_move_dir == "l") player.anims.play("misa-left-walk", true);
+	    else if (player_move_dir == "r") player.anims.play("misa-right-walk", true);
+	    else if (player_move_dir == "u") player.anims.play("misa-back-walk", true);
+	    else if (player_move_dir == "d") player.anims.play("misa-front-walk", true);
+	    else player.anims.stop();
 	  }
 
 	  // console.log("phase: " + phase + ", step: " + step);
@@ -383,17 +565,33 @@
 	                                           "x": Math.ceil((personas[persona_name].body.position.x) / tile_width),
 	                                           "y": Math.ceil((personas[persona_name].body.position.y) / tile_width)}
 	    }
+	    // In play mode, report the human player so the backend projects them
+	    // into the world for the agents to perceive.
+	    if (PLAY_MODE) {
+	      data["environment"]["Player"] = {
+	        "maze": curr_maze,
+	        "x": Math.ceil((player.body.position.x) / tile_width),
+	        "y": Math.ceil((player.body.position.y) / tile_width),
+	        "name": player_name,
+	        "description": "walking around the town"};
+	    }
 	    var json = JSON.stringify(data);
-	    // We then send this to the frontend server: 
-	    var retrieve_xobj = new XMLHttpRequest();
-	    retrieve_xobj.overrideMimeType("application/json");
-	    retrieve_xobj.open('POST', "{% url 'process_environment' %}", true);
-	    retrieve_xobj.send(json);   
-	    // Finally, we update the phase variable to start the "udpate" process. 
-	    // Now that we sent all persona locations to the backend server, we need
-	    // to wait until the backend determines what the personas will do next. 
+	    // Send the world state to the backend -- over the WebSocket if one is
+	    // open, otherwise via the original HTTP endpoint.
+	    if (wsReady()) {
+	      sim_ws.send(JSON.stringify({"action": "process", "step": step,
+	                                  "sim_code": sim_code,
+	                                  "environment": data["environment"]}));
+	    } else {
+	      var retrieve_xobj = new XMLHttpRequest();
+	      retrieve_xobj.overrideMimeType("application/json");
+	      retrieve_xobj.open('POST', "{% url 'process_environment' %}", true);
+	      retrieve_xobj.send(json);
+	    }
+	    // Now wait for the backend to determine what the personas do next.
+	    ws_awaiting_movement = false;
 	    phase = "update";
-	  } 
+	  }
 
 	  else if (phase == "update") { 
 	    // Update is where we * wait * for the backend server to finish 
@@ -405,7 +603,16 @@
 	    // Note that we do not want to overburden the backend too much by 
 	    // over-querying; so, we have a timer set so we only query it once every
 	    // timer_max cycles. 
-	    if (timer <= 0) {
+	    if (wsReady()) {
+	      // WebSocket path: ask once, then wait for the server to push the
+	      // movement (handled in sim_ws.onmessage, which advances the phase).
+	      if (!ws_awaiting_movement) {
+	        ws_awaiting_movement = true;
+	        sim_ws.send(JSON.stringify({"action": "await_movement",
+	                                    "step": step, "sim_code": sim_code}));
+	      }
+	    } else if (timer <= 0) {
+	      // Legacy HTTP polling fallback.
 	      var update_xobj = new XMLHttpRequest();
 	      update_xobj.overrideMimeType("application/json");
 	      update_xobj.open('POST', "{% url 'update_environment' %}", true);
@@ -420,10 +627,10 @@
 	          }
 	        }
 	      });
-	      update_xobj.send(JSON.stringify({"step": step, "sim_code": sim_code }));   
+	      update_xobj.send(JSON.stringify({"step": step, "sim_code": sim_code }));
 	    }
-	    timer = timer - 1; 
-	  } 
+	    timer = timer - 1;
+	  }
 
 	  else { 
 	    // This is where we actually move the personas in the visual world. Each
@@ -454,7 +661,35 @@
 	        pronunciatios[curr_persona_name].setText(initials + ": " + pronunciatio_content);
 	      }
 
-	      console.log(curr_persona_name);
+	      // --- Level B: paced on-map conversation bubbles ---
+      // The backend delivers the whole conversation in "chat" for its duration;
+      // we reveal it one line at a time (paced by wall-clock time), floating the
+      // current line above whoever is speaking. Listeners show a plain balloon.
+      let chat_lines = execute_movement["persona"][curr_persona_name]["chat"];
+      if (chat_lines && chat_lines.length > 0) {
+        let sig = curr_persona_name + "|" + JSON.stringify(chat_lines);
+        if (!convoProgress[sig]) convoProgress[sig] = {idx: 0, tNext: time + CHAT_LINE_MS};
+        let st = convoProgress[sig];
+        if (time > st.tNext && st.idx < chat_lines.length - 1) {
+          st.idx += 1; st.tNext = time + CHAT_LINE_MS;
+        }
+        let line = chat_lines[st.idx];
+        let speaker_first = (line[0] || "").trim().split(" ")[0].toLowerCase();
+        let my_first = curr_persona_name.split(" ")[0].toLowerCase();
+        if (speaker_first === my_first) {
+          curr_pronunciatio.setText("💬 " + line[1]);
+          curr_pronunciatio.setFontSize(14);
+          curr_pronunciatio.setWordWrapWidth(220, true);
+          curr_pronunciatio.setDepth(5);
+        } else {
+          curr_pronunciatio.setText("💬");
+          curr_pronunciatio.setFontSize(28);
+          curr_pronunciatio.setWordWrapWidth(null);
+        }
+      } else {
+        curr_pronunciatio.setFontSize(28);
+        curr_pronunciatio.setWordWrapWidth(null);
+      }
 	      if (execute_count > 0) {
 	        if (curr_persona.body.x < movement_target[curr_persona_name][0]) {
 	          curr_persona.body.x += movement_speed; 
@@ -484,21 +719,45 @@
           curr_pronunciatio.y = curr_persona.body.y - 42 - 32; // DEBUG 1 --- I added 32 offset on Dec 29. 
 
           if (anims_direction == "l") {
-			      curr_persona.anims.play("misa-left-walk", true);
+			      curr_persona.anims.play(curr_persona_name + "-left-walk", true);
+			      curr_persona.setAngle(0);
 			    } else if (anims_direction == "r") {
-			      curr_persona.anims.play("misa-right-walk", true);
+			      curr_persona.anims.play(curr_persona_name + "-right-walk", true);
+			      curr_persona.setAngle(0);
 			    } else if (anims_direction == "u") {
-			      curr_persona.anims.play("misa-back-walk", true);
+			      curr_persona.anims.play(curr_persona_name + "-up-walk", true);
+			      curr_persona.setAngle(0);
 			    } else if (anims_direction == "d") {
-			      curr_persona.anims.play("misa-front-walk", true);
+			      curr_persona.anims.play(curr_persona_name + "-down-walk", true);
+			      curr_persona.setAngle(0);
 			    } else {
 			      curr_persona.anims.stop();
 
-			      // If we were moving, pick an idle frame to use
-			      if (pre_anims_direction_dict[curr_persona_name] == "l") curr_persona.setTexture("atlas", "misa-left");else
-			      if (pre_anims_direction_dict[curr_persona_name] == "r") curr_persona.setTexture("atlas", "misa-right");else
-			      if (pre_anims_direction_dict[curr_persona_name] == "u") curr_persona.setTexture("atlas", "misa-back");else
-			      if (pre_anims_direction_dict[curr_persona_name] == "d") curr_persona.setTexture("atlas", "misa-front");
+			      // If we were moving, pick an idle frame from this agent's own atlas
+			      if (pre_anims_direction_dict[curr_persona_name] == "l") curr_persona.setTexture(curr_persona_name, "left");else
+			      if (pre_anims_direction_dict[curr_persona_name] == "r") curr_persona.setTexture(curr_persona_name, "right");else
+			      if (pre_anims_direction_dict[curr_persona_name] == "u") curr_persona.setTexture(curr_persona_name, "up");else
+			      if (pre_anims_direction_dict[curr_persona_name] == "d") curr_persona.setTexture(curr_persona_name, "down");
+
+			      // There is no dedicated "lying down" sprite, so while an agent is
+			      // sleeping we rotate the idle sprite onto its side -- this reads as
+			      // lying in bed rather than standing on it. When the backend supplies
+			      // the bed's geometry (object_pose) we align to the bed's real long
+			      // axis and snap to its center; otherwise we fall back to a 90 deg
+			      // rotate. Any other idle action (reading, cooking, etc.) stays
+			      // upright.
+			      // Rotate to lie along the bed's long axis if we know it, else a
+			      // plain 90deg. We deliberately do NOT move the sprite -- it already
+			      // sits on the bed tile from pathfinding, and repositioning was
+			      // shoving agents off their beds.
+			      let curr_pinfo = execute_movement["persona"][curr_persona_name] || {};
+			      let idle_desc = (curr_pinfo["description"] || "").toLowerCase();
+			      let pose = curr_pinfo["object_pose"];
+			      if (GROUND_SLEEP && idle_desc.indexOf("sleep") >= 0) {
+			        curr_persona.setAngle((pose && pose["orient"] === "v") ? 0 : 90);
+			      } else {
+			        curr_persona.setAngle(0);
+			      }
 			    };
 
 	      } 

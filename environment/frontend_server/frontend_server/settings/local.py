@@ -25,7 +25,9 @@ SECRET_KEY = 'c7l%1%b=2sh$o9zqvd4i*h8*__^@-5sm-y)m(1ib2t92)43@62'
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = [h.strip() for h in
+                 os.environ.get("DJANGO_ALLOWED_HOSTS", "").split(",")
+                 if h.strip()]
 
 
 # Application definition
@@ -72,6 +74,17 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = 'frontend_server.wsgi.application'
+
+# Optional real-time transport via Django Channels (WebSockets). Additive: if
+# `channels` is not installed the server runs over WSGI and the frontend falls
+# back to XHR polling. Mirrored here because this settings module redefines
+# INSTALLED_APPS and is loaded after base.py.
+try:
+    import channels  # noqa: F401
+    INSTALLED_APPS += ['channels']
+    ASGI_APPLICATION = 'frontend_server.routing.application'
+except ImportError:
+    pass
 
 
 # Database

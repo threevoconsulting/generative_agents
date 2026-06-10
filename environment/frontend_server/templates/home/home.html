@@ -7,6 +7,27 @@
 <div>
 	<div id="game-container" style="text-align: center"></div>
 
+	<!-- FOCUS MODE: click an agent to follow them ("through their eyes"),
+	     switchable live; "Free cam" returns to the roaming camera. -->
+	<div id="focus-bar" style="width:80%; margin:1em auto 0; text-align:center">
+		<strong style="margin-right:0.5em">Focus:</strong>
+		{% for p_name, p_name_os in persona_names %}
+			<button type="button" class="btn btn-default btn-sm focus-btn" data-name="{{ p_name }}"
+			        onclick="window.focusPersona('{{ p_name }}')" style="margin:0.15em">{{ p_name }}</button>
+		{% endfor %}
+		<button type="button" class="btn btn-default btn-sm" onclick="window.unfocus()" style="margin:0.15em">Free cam</button>
+	</div>
+	<script>
+		// Highlight the currently-followed agent's button.
+		window.onFocusChange = function (name) {
+			document.querySelectorAll('.focus-btn').forEach(function (b) {
+				var on = b.getAttribute('data-name') === name;
+				b.classList.toggle('active', on);
+				b.style.fontWeight = on ? 'bold' : 'normal';
+			});
+		};
+	</script>
+
 	<div style="width:55%; margin: 0 auto; margin-top:4.5em">
 		<h3 style="margin-bottom:-0.5em; font-size:1.5em">Current Time:</h3>
 		<div class="row">
@@ -37,7 +58,7 @@
 			<div class="media" style="background-color:#EEEEEE; padding:1em; padding-left:3.5em; padding-right:2em; border-radius:10px">
 			  <div class="media-left media-middle">
 			    <a href="#">
-			      <img class="media-object" src="{% static 'img/atlas.png' %}" style="width:5em">
+			      <img class="media-object" src="{% static 'assets/characters/profile/' %}{{ p_name_os }}.png" style="width:5em">
 			    </a>
 			  </div>
 			  <div class="media-body" style='padding-left:3em; padding-top:0.5em; padding-bottom:1em'>
@@ -75,5 +96,7 @@
 <!-- partial -->
 <script src='https://cdn.jsdelivr.net/npm/phaser@3.55.2/dist/phaser.js'></script>
 {% include 'home/main_script.html' %}
+{% include 'home/touch_controls.html' %}
+{% if mode == 'play' %}{% include 'home/play_controls.html' %}{% endif %}
 {% endblock content %}
 

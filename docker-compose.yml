@@ -1,0 +1,52 @@
+# Generative Agents -- single-container stack for Synology / Portainer.
+#
+# This stack uses an image you build on your PC and IMPORT into Portainer --
+# no registry / Docker Hub involved.
+#
+#   # 1) On your PC, in the repo root:
+#   docker build -t generative-agents:latest .
+#   docker save  -o generative-agents.tar generative-agents:latest
+#
+#   # 2) In Portainer:  Images -> Import -> upload generative-agents.tar
+#
+#   # 3) Deploy this file as a Stack and set ANTHROPIC_API_KEY (below).
+#
+# `pull_policy: never` tells Docker to use the locally imported image and never
+# try to pull it from a registry.
+#
+# After it is up:
+#   - Open http://<nas-ip>:8000/simulator_play?name=Alex  (play mode)
+#     or http://<nas-ip>:8000/simulator_home              (watch mode)
+#   - Start the simulation backend via Portainer: Container -> Console (bash),
+#     then:  cd /app/reverie/backend_server && python reverie.py
+#     and answer the prompts (fork sim, new sim name, then `run 1000`).
+
+services:
+  generative-agents:
+    image: ${GA_IMAGE:-generative-agents:latest}
+    container_name: generative-agents
+    # The image is built for amd64 (the Intel DS220+). Pinning the platform here
+    # is native on the NAS and runs under emulation on an Apple Silicon Mac --
+    # which silences the "platform does not match host" warning locally.
+    platform: linux/amd64
+    pull_policy: never
+    ports:
+      - "8000:8000"
+    environment:
+      # REQUIRED: your Anthropic API key (Claude text generation).
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}"
+      # Allow access via the NAS LAN IP (use "*" for any host on your LAN).
+      DJANGO_ALLOWED_HOSTS: "*"
+      # Defaults already select Claude + local embeddings. Override if desired:
+      # LLM_PROVIDER: "claude"
+      # EMBEDDING_BACKEND: "local"
+    volumes:
+      # Persist simulations across restarts. On first run this named volume is
+      # seeded from the image's bundled base simulations.
+      - ga_storage:/app/environment/frontend_server/storage
+    stdin_open: true   # allow attaching a console to drive reverie.py
+    tty: true
+    restart: unless-stopped
+
+volumes:
+  ga_storage:
