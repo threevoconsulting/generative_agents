@@ -562,6 +562,71 @@
 	}
 
 
+	// *** BUBBLE DE-OVERLAP ***
+	// Dialogue bubbles and pronunciatio chips must never cover each other --
+	// overlapping bubbles made conversations unreadable. Each frame, right
+	// after the natural above-the-head positions are set, this pass stacks any
+	// colliding elements upward: speakers' dialogue bubbles claim their spot
+	// first (so their tails stay on their own heads), then everything else
+	// shifts up out of the way. Shifts are recomputed from the natural
+	// positions every frame, so nothing drifts over time.
+	let BUBBLE_GAP = 4;
+
+	function bubbleRect(txt, bub) {
+	  let t = txt.getBounds();
+	  if (!bub || !bub.visible) {
+	    return {x: t.x, y: t.y, w: t.width, h: t.height};
+	  }
+	  // The bubble art extends past the text; use the union of both boxes.
+	  let b = bub.getBounds();
+	  let x = Math.min(b.x, t.x);
+	  let y = Math.min(b.y, t.y);
+	  return {x: x, y: y,
+	          w: Math.max(b.right, t.right) - x,
+	          h: Math.max(b.bottom, t.bottom) - y};
+	}
+
+	function layoutBubbles() {
+	  let entries = [];
+	  for (let name in personas) {
+	    if (!pronunciatios[name]) continue;
+	    entries.push({txt: pronunciatios[name],
+	                  bub: speech_bubbles[name],
+	                  speaking: speech_bubbles[name] && speech_bubbles[name].visible,
+	                  base_y: personas[name].body.y});
+	  }
+	  // Speakers place first; within each group, elements lower on the screen
+	  // keep their natural spot and higher ones stack above them.
+	  entries.sort(function (a, b) {
+	    if (a.speaking != b.speaking) return a.speaking ? -1 : 1;
+	    return b.base_y - a.base_y;
+	  });
+	  let placed = [];
+	  entries.forEach(function (e) {
+	    let r = bubbleRect(e.txt, e.bub);
+	    for (let guard = 0; guard < 40; guard++) {
+	      let hit = null;
+	      for (let i = 0; i < placed.length; i++) {
+	        let p = placed[i];
+	        if (r.x < p.x + p.w + BUBBLE_GAP && p.x < r.x + r.w + BUBBLE_GAP &&
+	            r.y < p.y + p.h + BUBBLE_GAP && p.y < r.y + r.h + BUBBLE_GAP) {
+	          hit = p;
+	          break;
+	        }
+	      }
+	      if (!hit) break;
+	      // Lift this element straight up until it clears the one it hit,
+	      // then re-check against everything already placed.
+	      let dy = (hit.y - r.h - BUBBLE_GAP) - r.y;
+	      e.txt.y += dy;
+	      if (e.bub && e.bub.visible) e.bub.y += dy;
+	      r.y += dy;
+	    }
+	    placed.push(r);
+	  });
+	}
+
+
 	function update(time, delta) {
 		// *** SETUP PLAY AND PAUSE BUTTON *** 
 		let play_context = this;
@@ -906,8 +971,14 @@
 	      }
 	    }
 
-	    // Filling in the action description. 
-	    if (execute_count == execute_count_max) { 
+	    // De-overlap pass: runs on the same frames the natural positions were
+	    // just recomputed, so the shifts never accumulate.
+	    if (execute_count > 0) {
+	      layoutBubbles();
+	    }
+
+	    // Filling in the action description.
+	    if (execute_count == execute_count_max) {
 	      for (let i=0; i<Object.keys(personas).length; i++) {
 	      	let action_description = ""
 	        let curr_persona_name = Object.keys(personas)[i];
