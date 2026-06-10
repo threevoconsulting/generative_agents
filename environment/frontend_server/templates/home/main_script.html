@@ -108,6 +108,7 @@
 
 	var personas = {};
 	var pronunciatios = {};
+	var speech_bubbles = {};
 	let anims_direction;
 	let pre_anims_direction;
 	let pre_anims_direction_dict = {};
@@ -189,9 +190,50 @@
 	// reveal is paced across the conversation instead of dumping all lines at once.
 	let CHAT_LINE_MS = 2800;
 	let convoProgress = {};
-	// Important: tile_width % movement_speed has to be 0. 
-	// <movement_speed> determines how fast we move at each upate cylce. 
-	let movement_speed = 32; 
+	// Tracks how many lines of each conversation have already been written to
+	// the on-page conversation feed (home.html), so each line is logged once
+	// even though both participants carry the same chat array.
+	let feedPushed = {};
+	// Important: tile_width % movement_speed has to be 0.
+	// <movement_speed> determines how fast we move at each upate cylce.
+	// 4px/frame = 8 frames per tile, so agents glide between tiles instead of
+	// teleporting a whole tile per frame (which is what 32 did).
+	let movement_speed = 4;
+
+	// Personas render 25% larger than their 32px frames for readability.
+	let SPRITE_SCALE = 1.25;
+	let sprite_disp_size = tile_width * SPRITE_SCALE;
+	// Walk-cycle speed; slightly faster than the original 4 so the leg cadence
+	// matches the new glide speed.
+	let WALK_FRAME_RATE = 6;
+
+	// *** RENDER DEPTHS ***
+	// Personas are Y-sorted every frame (depth = body.y, the painter's
+	// algorithm) so agents lower on the screen draw in front of agents above
+	// them. Foreground tile layers (roofs, wall tops) sit above every persona,
+	// and speech bubbles/pronunciatios sit above everything so dialogue is
+	// never hidden -- while staying Y-sorted among themselves.
+	let FOREGROUND_DEPTH = 100000;
+	let BUBBLE_DEPTH = 1000000;
+
+	// Speech-bubble fit around the dialogue text: horizontal padding, headroom
+	// above the text, and how far the bubble's tail extends below the text.
+	let BUBBLE_PAD_X = 14;
+	let BUBBLE_PAD_TOP = 8;
+	let BUBBLE_TAIL = 14;
+
+	// *** OBJECT-INTERACTION GROUNDING ***
+	// When an idle agent is standing on one of these game objects, we pose them
+	// so they read as *using* it rather than standing on it. Seat-like objects
+	// face the camera ("sitting"); appliance-like objects face away ("using").
+	// If a character's sprite sheet ships dedicated "sit"/"lie" frames (added
+	// to assets/characters/<Name>.png + atlas.json), those are used instead --
+	// the approximation is only the fallback.
+	let SEAT_OBJECTS = ["chair", "sofa", "couch", "bench", "stool", "seating"];
+	let APPLIANCE_OBJECTS = ["sink", "desk", "stove", "counter", "cooking area",
+	                         "kitchen", "refrigerator", "toilet", "shower",
+	                         "bathtub", "piano", "easel", "computer", "shelf",
+	                         "bookshelf", "cabinet", "dresser", "blackboard"];
 
 	// <timer_max> determines how frequently our update function will query the 
 	// frontend server. If it's higher, we wait longer cycles. 
@@ -276,6 +318,9 @@
 	    this.load.atlas(pkey, char_base + pkey.replace(/ /g, "_") + ".png",
 	                    char_json);
 	  }
+
+	  // Speech-bubble art shown behind the active speaker's dialogue line.
+	  this.load.image('speech_bubble', "{% static 'assets/speech_bubble/v3.png' %}");
 	}
 
 	function create() {
@@ -326,8 +371,10 @@
 	  const interiorFurnitureL2Layer = map.createLayer("Interior Furniture L2 ", tileset_group_1, 0, 0);
 	  const foregroundL1Layer = map.createLayer("Foreground L1", tileset_group_1, 0, 0);
 	  const foregroundL2Layer = map.createLayer("Foreground L2", tileset_group_1, 0, 0);
-	  foregroundL1Layer.setDepth(2);
-	  foregroundL2Layer.setDepth(2);
+	  // Roofs and wall tops must occlude every Y-sorted persona (whose depths
+	  // top out around the map height in pixels), so they sit far above them.
+	  foregroundL1Layer.setDepth(FOREGROUND_DEPTH);
+	  foregroundL2Layer.setDepth(FOREGROUND_DEPTH);
 
 	  const collisionsLayer = map.createLayer("Collisions", collisions, 0, 0);
 	  // const groundLayer = map.createLayer("Ground", walls, 0, 0);
@@ -435,22 +482,42 @@
 	                     spawn_tile_loc[persona_name][1] * tile_width + tile_width];
 	    // Each persona renders from their own loaded atlas (keyed by name), so
 	    // they look like themselves instead of all sharing the Misa sprite.
+	    // The body's y-offset equals the frame height so the sprite's *feet*
+	    // stay anchored to body.y at any display scale; the x-offset keeps the
+	    // scaled sprite horizontally centered on its tile.
 	    let new_sprite = this.physics.add
 	                         .sprite(start_pos[0], start_pos[1], persona_name, "down")
 	                         .setSize(30, 40)
-	                         .setOffset(0, 32); // DEBUG 1 --- I added 32 offset on Dec 29.
+	                         .setOffset(tile_width * (SPRITE_SCALE - 1) / 2 / SPRITE_SCALE, 32);
+	    new_sprite.displayWidth = sprite_disp_size;
+	    new_sprite.scaleY = new_sprite.scaleX;
+	    new_sprite.setDepth(new_sprite.body.y);
 	    // Here, we are creating the persona and its pronunciatio sprites.
 	    personas[persona_name] = new_sprite;
+
+	    // One hidden speech-bubble image per persona; shown (and sized to the
+	    // current line) only while they are the active speaker.
+	    speech_bubbles[persona_name] = this.add.image(
+	                                    start_pos[0],
+	                                    start_pos[1] - sprite_disp_size - 30,
+	                                    'speech_bubble')
+	                                   .setVisible(false)
+	                                   .setDepth(BUBBLE_DEPTH + new_sprite.body.y - 1);
+
+	    // The pronunciatio is bottom-center anchored so both the emoji chip and
+	    // multi-line dialogue stay centered above the agent's head.
 	    pronunciatios[persona_name] = this.add.text(
-	                                   new_sprite.body.x - 6, 
-	                                   new_sprite.body.y - 42 - 32, // DEBUG 1 --- I added 32 offset on Dec 29. 
+	                                   start_pos[0],
+	                                   start_pos[1] - sprite_disp_size - 8,
 	                                   "🦁", {
-	                                   font: "28px monospace", 
-	                                   fill: "#000000", 
-	                                   padding: { x: 8, y: 8}, 
+	                                   font: "28px monospace",
+	                                   fill: "#000000",
+	                                   padding: { x: 8, y: 8},
 	                                   backgroundColor: "#ffffff",
 	                                   border:"solid",
-	                                   borderRadius:"10px"}).setDepth(3);
+	                                   borderRadius:"10px"})
+	                                  .setOrigin(0.5, 1)
+	                                  .setDepth(BUBBLE_DEPTH + new_sprite.body.y);
 	  }
 
 	  // Create the player's walking animations from the texture atlas. These are
@@ -488,10 +555,75 @@
 	        key: pkey + "-" + dir + "-walk",
 	        frames: anims.generateFrameNames(pkey,
 	                  { prefix: dir + "-walk.", start: 0, end: 3, zeroPad: 3 }),
-	        frameRate: 4,
+	        frameRate: WALK_FRAME_RATE,
 	        repeat: -1 });
 	    });
 	  }
+	}
+
+
+	// *** BUBBLE DE-OVERLAP ***
+	// Dialogue bubbles and pronunciatio chips must never cover each other --
+	// overlapping bubbles made conversations unreadable. Each frame, right
+	// after the natural above-the-head positions are set, this pass stacks any
+	// colliding elements upward: speakers' dialogue bubbles claim their spot
+	// first (so their tails stay on their own heads), then everything else
+	// shifts up out of the way. Shifts are recomputed from the natural
+	// positions every frame, so nothing drifts over time.
+	let BUBBLE_GAP = 4;
+
+	function bubbleRect(txt, bub) {
+	  let t = txt.getBounds();
+	  if (!bub || !bub.visible) {
+	    return {x: t.x, y: t.y, w: t.width, h: t.height};
+	  }
+	  // The bubble art extends past the text; use the union of both boxes.
+	  let b = bub.getBounds();
+	  let x = Math.min(b.x, t.x);
+	  let y = Math.min(b.y, t.y);
+	  return {x: x, y: y,
+	          w: Math.max(b.right, t.right) - x,
+	          h: Math.max(b.bottom, t.bottom) - y};
+	}
+
+	function layoutBubbles() {
+	  let entries = [];
+	  for (let name in personas) {
+	    if (!pronunciatios[name]) continue;
+	    entries.push({txt: pronunciatios[name],
+	                  bub: speech_bubbles[name],
+	                  speaking: speech_bubbles[name] && speech_bubbles[name].visible,
+	                  base_y: personas[name].body.y});
+	  }
+	  // Speakers place first; within each group, elements lower on the screen
+	  // keep their natural spot and higher ones stack above them.
+	  entries.sort(function (a, b) {
+	    if (a.speaking != b.speaking) return a.speaking ? -1 : 1;
+	    return b.base_y - a.base_y;
+	  });
+	  let placed = [];
+	  entries.forEach(function (e) {
+	    let r = bubbleRect(e.txt, e.bub);
+	    for (let guard = 0; guard < 40; guard++) {
+	      let hit = null;
+	      for (let i = 0; i < placed.length; i++) {
+	        let p = placed[i];
+	        if (r.x < p.x + p.w + BUBBLE_GAP && p.x < r.x + r.w + BUBBLE_GAP &&
+	            r.y < p.y + p.h + BUBBLE_GAP && p.y < r.y + r.h + BUBBLE_GAP) {
+	          hit = p;
+	          break;
+	        }
+	      }
+	      if (!hit) break;
+	      // Lift this element straight up until it clears the one it hit,
+	      // then re-check against everything already placed.
+	      let dy = (hit.y - r.h - BUBBLE_GAP) - r.y;
+	      e.txt.y += dy;
+	      if (e.bub && e.bub.visible) e.bub.y += dy;
+	      r.y += dy;
+	    }
+	    placed.push(r);
+	  });
 	}
 
 
@@ -538,13 +670,15 @@
 	    player.body.setVelocityY(camera_speed);
 	    player_move_dir = "d";
 	  }
-	  // Animate the player's avatar in play mode.
+	  // Animate the player's avatar in play mode, and keep them in the same
+	  // Y-sorted depth scheme as the agents.
 	  if (PLAY_MODE) {
 	    if (player_move_dir == "l") player.anims.play("misa-left-walk", true);
 	    else if (player_move_dir == "r") player.anims.play("misa-right-walk", true);
 	    else if (player_move_dir == "u") player.anims.play("misa-back-walk", true);
 	    else if (player_move_dir == "d") player.anims.play("misa-front-walk", true);
 	    else player.anims.stop();
+	    player.setDepth(player.body.y);
 	  }
 
 	  // console.log("phase: " + phase + ", step: " + step);
@@ -663,9 +797,12 @@
 
 	      // --- Level B: paced on-map conversation bubbles ---
       // The backend delivers the whole conversation in "chat" for its duration;
-      // we reveal it one line at a time (paced by wall-clock time), floating the
-      // current line above whoever is speaking. Listeners show a plain balloon.
+      // we reveal it one line at a time (paced by wall-clock time), showing the
+      // current line inside the speech-bubble graphic above whoever is
+      // speaking. Listeners show a plain balloon. Each newly revealed line is
+      // also appended (once) to the conversation feed panel in home.html.
       let chat_lines = execute_movement["persona"][curr_persona_name]["chat"];
+      let curr_bubble = speech_bubbles[curr_persona_name];
       if (chat_lines && chat_lines.length > 0) {
         let sig = curr_persona_name + "|" + JSON.stringify(chat_lines);
         if (!convoProgress[sig]) convoProgress[sig] = {idx: 0, tNext: time + CHAT_LINE_MS};
@@ -673,22 +810,41 @@
         if (time > st.tNext && st.idx < chat_lines.length - 1) {
           st.idx += 1; st.tNext = time + CHAT_LINE_MS;
         }
+        // Log revealed lines to the feed exactly once per conversation, keyed
+        // on the conversation content (both participants share it).
+        let feed_key = JSON.stringify(chat_lines);
+        let pushed = feedPushed[feed_key] || 0;
+        for (let k = pushed; k <= st.idx; k++) {
+          if (window.convoFeedAppend) {
+            window.convoFeedAppend(chat_lines[k][0], chat_lines[k][1],
+                                   execute_movement["meta"]["curr_time"]);
+          }
+        }
+        if (st.idx + 1 > pushed) feedPushed[feed_key] = st.idx + 1;
+
         let line = chat_lines[st.idx];
         let speaker_first = (line[0] || "").trim().split(" ")[0].toLowerCase();
         let my_first = curr_persona_name.split(" ")[0].toLowerCase();
         if (speaker_first === my_first) {
-          curr_pronunciatio.setText("💬 " + line[1]);
+          // Active speaker: dialogue text on top of the bubble art, so the
+          // text's own white box is made transparent.
+          curr_pronunciatio.setText(line[1]);
           curr_pronunciatio.setFontSize(14);
           curr_pronunciatio.setWordWrapWidth(220, true);
-          curr_pronunciatio.setDepth(5);
+          curr_pronunciatio.setBackgroundColor("rgba(0,0,0,0)");
+          curr_bubble.setVisible(true);
         } else {
           curr_pronunciatio.setText("💬");
           curr_pronunciatio.setFontSize(28);
           curr_pronunciatio.setWordWrapWidth(null);
+          curr_pronunciatio.setBackgroundColor("#ffffff");
+          curr_bubble.setVisible(false);
         }
       } else {
         curr_pronunciatio.setFontSize(28);
         curr_pronunciatio.setWordWrapWidth(null);
+        curr_pronunciatio.setBackgroundColor("#ffffff");
+        curr_bubble.setVisible(false);
       }
 	      if (execute_count > 0) {
 	        if (curr_persona.body.x < movement_target[curr_persona_name][0]) {
@@ -715,8 +871,27 @@
 	        	anims_direction = "";
 	        }
 
-	        curr_pronunciatio.x = curr_persona.body.x - 6; 
-          curr_pronunciatio.y = curr_persona.body.y - 42 - 32; // DEBUG 1 --- I added 32 offset on Dec 29. 
+	        // Keep the pronunciatio/dialogue bottom-centered above the agent's
+	        // head, and Y-sort everything: the agent at its feet (painter's
+	        // algorithm, so lower agents draw in front of higher ones), the
+	        // bubble and text far above the map layers so dialogue is never
+	        // occluded by roofs or other agents.
+	        curr_pronunciatio.x = curr_persona.body.x + tile_width / 2;
+          curr_pronunciatio.y = curr_persona.body.y - sprite_disp_size - 8;
+          curr_persona.setDepth(curr_persona.body.y);
+          curr_pronunciatio.setDepth(BUBBLE_DEPTH + curr_persona.body.y);
+          if (curr_bubble.visible) {
+            // Fit the bubble art around the current dialogue line, leaving
+            // room below the text for the bubble's tail.
+            curr_bubble.displayWidth = curr_pronunciatio.width + BUBBLE_PAD_X * 2;
+            curr_bubble.displayHeight = curr_pronunciatio.height
+                                        + BUBBLE_PAD_TOP + BUBBLE_TAIL;
+            curr_bubble.x = curr_pronunciatio.x;
+            curr_bubble.y = curr_pronunciatio.y
+                            - curr_pronunciatio.height / 2
+                            + (BUBBLE_TAIL - BUBBLE_PAD_TOP) / 2;
+            curr_bubble.setDepth(BUBBLE_DEPTH + curr_persona.body.y - 1);
+          }
 
           if (anims_direction == "l") {
 			      curr_persona.anims.play(curr_persona_name + "-left-walk", true);
@@ -739,24 +914,43 @@
 			      if (pre_anims_direction_dict[curr_persona_name] == "u") curr_persona.setTexture(curr_persona_name, "up");else
 			      if (pre_anims_direction_dict[curr_persona_name] == "d") curr_persona.setTexture(curr_persona_name, "down");
 
-			      // There is no dedicated "lying down" sprite, so while an agent is
-			      // sleeping we rotate the idle sprite onto its side -- this reads as
-			      // lying in bed rather than standing on it. When the backend supplies
-			      // the bed's geometry (object_pose) we align to the bed's real long
-			      // axis and snap to its center; otherwise we fall back to a 90 deg
-			      // rotate. Any other idle action (reading, cooking, etc.) stays
-			      // upright.
-			      // Rotate to lie along the bed's long axis if we know it, else a
-			      // plain 90deg. We deliberately do NOT move the sprite -- it already
-			      // sits on the bed tile from pathfinding, and repositioning was
-			      // shoving agents off their beds.
+			      // *** OBJECT-INTERACTION GROUNDING ***
+			      // While idle on a game object, pose the agent so they read as
+			      // using it instead of standing on it. Preference order: a real
+			      // "lie"/"sit" frame if this character's sheet ships one (drop-in
+			      // via atlas.json), else an approximation with the existing
+			      // 20-frame art (rotate for sleep, face the camera for seats, face
+			      // away for appliances). We deliberately do NOT move the sprite --
+			      // it already sits on the object tile from pathfinding, and
+			      // repositioning was shoving agents off their beds.
 			      let curr_pinfo = execute_movement["persona"][curr_persona_name] || {};
 			      let idle_desc = (curr_pinfo["description"] || "").toLowerCase();
 			      let pose = curr_pinfo["object_pose"];
+			      // The object being used: from the cluster geometry if the agent
+			      // stands on one, else the last segment of the action address
+			      // ("... @ world:sector:arena:game_object").
+			      let idle_addr = (curr_pinfo["description"] || "").split("@")[1] || "";
+			      let idle_obj = ((pose && pose["object"]) ||
+			                      idle_addr.split(":").pop() || "").trim().toLowerCase();
+			      let char_tex = this.textures.get(curr_persona_name);
+			      curr_persona.setAngle(0);
 			      if (GROUND_SLEEP && idle_desc.indexOf("sleep") >= 0) {
-			        curr_persona.setAngle((pose && pose["orient"] === "v") ? 0 : 90);
-			      } else {
-			        curr_persona.setAngle(0);
+			        if (char_tex.has("lie")) {
+			          curr_persona.setTexture(curr_persona_name, "lie");
+			        } else {
+			          // Rotate to lie along the bed's long axis if we know it,
+			          // else a plain 90deg.
+			          curr_persona.setAngle((pose && pose["orient"] === "v") ? 0 : 90);
+			        }
+			      } else if (idle_obj &&
+			                 SEAT_OBJECTS.some(function (o) { return idle_obj.indexOf(o) >= 0; })) {
+			        curr_persona.setTexture(curr_persona_name,
+			                                char_tex.has("sit") ? "sit" : "down");
+			      } else if (idle_obj &&
+			                 APPLIANCE_OBJECTS.some(function (o) { return idle_obj.indexOf(o) >= 0; })) {
+			        // Facing away from the camera reads as working at the
+			        // appliance (counters/sinks/desks sit against upper walls).
+			        curr_persona.setTexture(curr_persona_name, "up");
 			      }
 			    };
 
@@ -777,8 +971,14 @@
 	      }
 	    }
 
-	    // Filling in the action description. 
-	    if (execute_count == execute_count_max) { 
+	    // De-overlap pass: runs on the same frames the natural positions were
+	    // just recomputed, so the shifts never accumulate.
+	    if (execute_count > 0) {
+	      layoutBubbles();
+	    }
+
+	    // Filling in the action description.
+	    if (execute_count == execute_count_max) {
 	      for (let i=0; i<Object.keys(personas).length; i++) {
 	      	let action_description = ""
 	        let curr_persona_name = Object.keys(personas)[i];
