@@ -182,8 +182,9 @@
 
 	// <tile_width> is the width of one individual tile (tiles are square)
 	let tile_width = 32;
-	// While sleeping, rotate the idle sprite to lie along the bed's long axis
-	// (using object_pose from the backend). Set to false to keep agents upright.
+	// While sleeping on a bed, show the tucked-in pose (face-the-camera frame
+	// on the bed's pillow row, or a real "lie" frame if the character's sheet
+	// has one). Set to false to disable any special sleep pose.
 	let GROUND_SLEEP = true;
 	// Conversation bubbles: how long (ms) each line of dialogue stays up before
 	// the next line is revealed, plus a per-conversation progress tracker so the
@@ -942,13 +943,14 @@
 			        if (char_tex.has("lie")) {
 			          curr_persona.setTexture(curr_persona_name, "lie");
 			        } else if (idle_obj.indexOf("bed") >= 0) {
-			          // Tucked-in look: face the camera, and only rotate when the
-			          // bed's long axis really is horizontal. The Ville's beds are
-			          // drawn headboard-up (vertical), so square or unknown
-			          // clusters stay upright -- rotating those was what left
-			          // sleepers lying in weird directions.
+			          // Tucked-in look: face the camera, upright, on the bed's
+			          // pillow row. NEVER rotate from the cluster's orient: the
+			          // walkable "bed" tiles are just the pillow row (a double bed
+			          // is 2 tiles side by side, reading as "horizontal"), while
+			          // every bed in the Ville is drawn headboard-up -- rotating
+			          // by cluster shape is what left sleepers lying sideways
+			          // across their beds.
 			          curr_persona.setTexture(curr_persona_name, "down");
-			          if (pose && pose["orient"] === "h") curr_persona.setAngle(90);
 			        }
 			        // Sleeping anywhere that isn't a bed (the sim sometimes parks
 			        // a sleeper at a toilet or shower): stay upright -- the zzz
