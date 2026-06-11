@@ -132,9 +132,33 @@ def execute(persona, maze, personas, plan):
           pass_curr_tile = True
       if not pass_curr_tile: 
         new_target_tiles += [i]
-    if len(new_target_tiles) == 0: 
+    if len(new_target_tiles) == 0:
       new_target_tiles = target_tiles
     target_tiles = new_target_tiles
+
+    # Sleep actions aim for the center tile of the bed cluster rather than
+    # whatever edge tile the sample produced, so sleepers lie centered on
+    # their bed. Doing this here -- at path-target selection -- keeps a
+    # single source of truth for the persona's tile (the frontend renders
+    # wherever the backend says; retargeting on the frontend made the two
+    # fight). If the center is taken by someone else (a shared double bed),
+    # the sampled tile is kept so partners settle on different tiles.
+    act_desc = (persona.scratch.act_description or "").lower()
+    if "sleep" in act_desc and "bed" in plan.split(":")[-1]:
+      centered_tiles = []
+      for t in target_tiles:
+        pose = maze.get_game_object_pose(t)
+        if pose and "bed" in pose["object"]:
+          c = (int(round(pose["anchor_tile"][0])),
+               int(round(pose["anchor_tile"][1])))
+          c_tile = maze.access_tile(c)
+          occupied = any(j[0] in persona_name_set and j[0] != persona.name
+                         for j in c_tile["events"])
+          if "bed" in (c_tile["game_object"] or "") and not occupied:
+            centered_tiles += [c]
+            continue
+        centered_tiles += [tuple(t)]
+      target_tiles = list(dict.fromkeys(centered_tiles))
 
     # Now that we've identified the target tile, we find the shortest path to
     # one of the target tiles. 

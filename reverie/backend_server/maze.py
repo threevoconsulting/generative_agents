@@ -292,7 +292,11 @@ class Maze:
     min_y, max_y = min(ys), max(ys)
     width = max_x - min_x + 1
     height = max_y - min_y + 1
-    orient = "h" if width >= height else "v"
+    # Strictly wider than tall counts as horizontal; square clusters (1x1
+    # fixtures, 2x2 double beds) default to vertical, matching how the
+    # Ville's furniture art is drawn (bed headboards at the top). The old
+    # ">=" tie-break rotated sleepers sideways on square objects.
+    orient = "h" if width > height else "v"
     anchor_tile = [(min_x + max_x) / 2.0, (min_y + max_y) / 2.0]
     return {"object": obj, "orient": orient, "anchor_tile": anchor_tile}
 

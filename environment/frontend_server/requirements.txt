@@ -7,7 +7,11 @@
 
 Django>=2.2,<2.3
 channels>=2.4,<3             # WebSocket transport (Django 2.2 compatible)
-asgiref>=3.2,<4              # required by channels
+# channels 2.x's HTTP handler is broken with asgiref >= 3.3: requests start
+# failing with 500 "CurrentThreadExecutor already quit or is broken" (incl.
+# static files, so the map never loads). See django/channels#1587 -- only
+# fixed in channels 3. Keep asgiref below 3.3 as long as channels 2.x is used.
+asgiref>=3.2,<3.3            # required by channels; MUST stay < 3.3
 django-cors-headers>=2.5,<3.6   # 'corsheaders' app in INSTALLED_APPS
 django-storages>=1.9,<1.13      # 'storages' app in INSTALLED_APPS
 gunicorn>=20,<21            # WSGI server referenced by Procfile
