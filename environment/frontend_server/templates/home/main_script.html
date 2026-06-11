@@ -182,8 +182,9 @@
 
 	// <tile_width> is the width of one individual tile (tiles are square)
 	let tile_width = 32;
-	// While sleeping, rotate the idle sprite to lie along the bed's long axis
-	// (using object_pose from the backend). Set to false to keep agents upright.
+	// While sleeping on a bed, show the tucked-in pose (face-the-camera frame
+	// on the bed's pillow row, or a real "lie" frame if the character's sheet
+	// has one). Set to false to disable any special sleep pose.
 	let GROUND_SLEEP = true;
 	// Conversation bubbles: how long (ms) each line of dialogue stays up before
 	// the next line is revealed, plus a per-conversation progress tracker so the
@@ -778,11 +779,15 @@
 	      let curr_persona = personas[curr_persona_name];
 	      let curr_pronunciatio = pronunciatios[Object.keys(personas)[i]];
 
-	      if (execute_count == execute_count_max) { 
+	      if (execute_count == execute_count_max) {
+	        // The backend's tile is authoritative: never retarget an agent
+	        // elsewhere (e.g. to a bed's center) -- the backend re-paths them
+	        // straight back to its own chosen tile, and the two ends fight,
+	        // leaving sleepers endlessly shuffling around their beds.
 	        let curr_x = execute_movement["persona"][curr_persona_name]["movement"][0];
 	        let curr_y = execute_movement["persona"][curr_persona_name]["movement"][1];
-	        movement_target[curr_persona_name] = [curr_x * tile_width, 
-	                                              curr_y * tile_width]; 
+	        movement_target[curr_persona_name] = [curr_x * tile_width,
+	                                              curr_y * tile_width];
 	        let pronunciatio_content = execute_movement["persona"][curr_persona_name]["pronunciatio"];
 	        // This is what gives the pronunciatio balloon the name initials. We 
 	        // use regex to extract the initials of the personas. 
@@ -937,11 +942,20 @@
 			      if (GROUND_SLEEP && idle_desc.indexOf("sleep") >= 0) {
 			        if (char_tex.has("lie")) {
 			          curr_persona.setTexture(curr_persona_name, "lie");
-			        } else {
-			          // Rotate to lie along the bed's long axis if we know it,
-			          // else a plain 90deg.
-			          curr_persona.setAngle((pose && pose["orient"] === "v") ? 0 : 90);
+			        } else if (idle_obj.indexOf("bed") >= 0) {
+			          // Tucked-in look: face the camera, upright, on the bed's
+			          // pillow row. NEVER rotate from the cluster's orient: the
+			          // walkable "bed" tiles are just the pillow row (a double bed
+			          // is 2 tiles side by side, reading as "horizontal"), while
+			          // every bed in the Ville is drawn headboard-up -- rotating
+			          // by cluster shape is what left sleepers lying sideways
+			          // across their beds.
+			          curr_persona.setTexture(curr_persona_name, "down");
 			        }
+			        // Sleeping anywhere that isn't a bed (the sim sometimes parks
+			        // a sleeper at a toilet or shower): stay upright -- the zzz
+			        // chip carries the meaning; lying sideways on a toilet does
+			        // not.
 			      } else if (idle_obj &&
 			                 SEAT_OBJECTS.some(function (o) { return idle_obj.indexOf(o) >= 0; })) {
 			        curr_persona.setTexture(curr_persona_name,
