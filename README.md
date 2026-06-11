@@ -134,6 +134,17 @@ Your simulation should be running, and you will see the agents moving on the map
 
 The saved simulation can be accessed the next time you run the simulation server by providing the name of your simulation as the forked simulation. This will allow you to restart your simulation from the point where you left off.
 
+#### Headless runs (process first, watch later)
+A plain `run` only advances while the browser tab is open and visible: each step, the backend waits for the browser to animate the agents and report their new positions back, and browsers freeze that animation loop as soon as the tab is hidden or the machine sleeps. That is why a run appears to "pause" whenever you walk away from the screen.
+
+For long unattended runs (e.g. overnight scenario runs), use:
+
+    run headless <step-count>
+
+In headless mode the backend feeds each step's results straight back into the next one, so **no browser is needed at all** — close the tab, lock the screen, let it churn. When it finishes, watch the whole run back at `http://localhost:8000/replay/<simulation-name>/1/` (see Step 4). Don't keep the live `simulator_home` tab open *during* a headless run — it would try to drive the same simulation.
+
+Note that the pace of a run (headless or not) is set by the agents' thinking: steps where someone replans their day or holds a conversation involve many LLM calls and take much longer than steps where everyone is mid-walk, so uneven step times are normal.
+
 ### Play Mode: living in the town
 The simulation can run in two modes:
 

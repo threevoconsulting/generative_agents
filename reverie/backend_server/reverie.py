@@ -392,17 +392,25 @@ class ReverieServer:
         traceback.print_exc()
 
 
-  def start_server(self, int_counter):
+  def start_server(self, int_counter, headless=False):
     """
-    The main backend server of Reverie. 
-    This function retrieves the environment file from the frontend to 
-    understand the state of the world, calls on each personas to make 
+    The main backend server of Reverie.
+    This function retrieves the environment file from the frontend to
+    understand the state of the world, calls on each personas to make
     decisions based on the world state, and saves their moves at certain step
-    intervals. 
+    intervals.
     INPUT
       int_counter: Integer value for the number of steps left for us to take
-                   in this iteration. 
-    OUTPUT 
+                   in this iteration.
+      headless: If True, run without a browser attached. Normally each step
+                only advances once the frontend (the open browser tab) has
+                animated the previous step and POSTed back an environment
+                file -- which means the simulation stalls whenever the tab is
+                hidden or the machine sleeps. In headless mode the backend
+                writes the next environment file itself from the movement it
+                just computed, so the whole run can be processed unattended
+                and watched later via /replay/<sim_code>/<step>/.
+    OUTPUT
       None
     """
     # <sim_folder> points to the current simulation folder.
@@ -546,15 +554,33 @@ class ReverieServer:
           with open(curr_move_file, "w") as outfile:
             outfile.write(json.dumps(movements, indent=2))
 
-          # After this cycle, the world takes one step forward, and the 
-          # current time moves by <sec_per_step> amount. 
+          # After this cycle, the world takes one step forward, and the
+          # current time moves by <sec_per_step> amount.
           self.step += 1
           self.curr_time += datetime.timedelta(seconds=self.sec_per_step)
 
           int_counter -= 1
-          
-      # Sleep so we don't burn our machines. 
-      time.sleep(self.server_sleep)
+
+          # HEADLESS MODE: with no browser attached, nothing would ever write
+          # the next environment file and this loop would wait forever. The
+          # backend already knows exactly where every persona ends up this
+          # step (the movement targets it just wrote), so feed those straight
+          # back as the next environment and keep marching.
+          if headless:
+            next_env = dict()
+            for persona_name in self.personas:
+              mv = movements["persona"][persona_name]["movement"]
+              next_env[persona_name] = {"maze": self.maze.maze_name,
+                                        "x": mv[0],
+                                        "y": mv[1]}
+            next_env_file = f"{sim_folder}/environment/{self.step}.json"
+            with open(next_env_file, "w") as outfile:
+              outfile.write(json.dumps(next_env, indent=2))
+
+      # Sleep so we don't burn our machines. (In headless mode there is
+      # nothing to wait for -- the next environment file is already on disk.)
+      if not headless:
+        time.sleep(self.server_sleep)
 
 
   def open_server(self): 
@@ -618,10 +644,18 @@ class ReverieServer:
 
         elif sim_command[:3].lower() == "run":
           # Runs the number of steps specified in the prompt.
-          # Example: run 1000
+          # Example: run 1000          (live -- needs the map open in a browser
+          #                             tab; stalls while the tab is hidden)
+          # Example: run headless 1000 (unattended -- no browser needed; watch
+          #                             the result later in /replay/)
           int_count = int(sim_command.split()[-1])
+          headless = "headless" in sim_command.lower()
           try:
-            rs.start_server(int_count)
+            rs.start_server(int_count, headless=headless)
+            if headless:
+              print(f"\n✅  Headless run finished at step {self.step}. Watch "
+                    f"it back at\n    "
+                    f"http://localhost:8000/replay/{self.sim_code}/1/")
           except KeyboardInterrupt:
             # Ctrl+C during a run: stop cleanly and return to the menu instead
             # of dumping a scary traceback. Every completed step is already
