@@ -248,9 +248,6 @@
 	let execute_count_max = tile_width/movement_speed;
 	let execute_count = execute_count_max;
 	let movement_target = {};
-	// Bed-center tiles claimed by sleepers this step, so two agents sharing a
-	// bed don't get retargeted onto the exact same tile.
-	let claimed_sleep_tiles = {};
 	
 
 	// ###########################################################################
@@ -776,32 +773,18 @@
 	    // The execute_count_max is computed by tile_width/movement_speed, which
 	    // defines a one step sequence in this world. 
 	    document.getElementById("game-time-content").innerHTML = execute_movement["meta"]["curr_time"];
-	    if (execute_count == execute_count_max) claimed_sleep_tiles = {};
 	    for (let i=0; i<Object.keys(personas).length; i++) {
 	      let curr_persona_name = Object.keys(personas)[i];
 	      let curr_persona = personas[curr_persona_name];
 	      let curr_pronunciatio = pronunciatios[Object.keys(personas)[i]];
 
 	      if (execute_count == execute_count_max) {
+	        // The backend's tile is authoritative: never retarget an agent
+	        // elsewhere (e.g. to a bed's center) -- the backend re-paths them
+	        // straight back to its own chosen tile, and the two ends fight,
+	        // leaving sleepers endlessly shuffling around their beds.
 	        let curr_x = execute_movement["persona"][curr_persona_name]["movement"][0];
 	        let curr_y = execute_movement["persona"][curr_persona_name]["movement"][1];
-	        // A sleeper standing on a bed glides to the bed's center tile
-	        // instead of stopping on whatever edge tile pathfinding reached,
-	        // so they lie centered on the bed. First-come claims the tile so
-	        // two agents sharing a bed keep separate tiles.
-	        let target_pinfo = execute_movement["persona"][curr_persona_name];
-	        let target_pose = target_pinfo["object_pose"];
-	        if (target_pose && target_pose["anchor_tile"] &&
-	            (target_pose["object"] || "").toLowerCase().indexOf("bed") >= 0 &&
-	            (target_pinfo["description"] || "").toLowerCase().indexOf("sleep") >= 0) {
-	          let ax = Math.round(target_pose["anchor_tile"][0]);
-	          let ay = Math.round(target_pose["anchor_tile"][1]);
-	          if (!claimed_sleep_tiles[ax + "," + ay]) {
-	            claimed_sleep_tiles[ax + "," + ay] = true;
-	            curr_x = ax;
-	            curr_y = ay;
-	          }
-	        }
 	        movement_target[curr_persona_name] = [curr_x * tile_width,
 	                                              curr_y * tile_width];
 	        let pronunciatio_content = execute_movement["persona"][curr_persona_name]["pronunciatio"];
