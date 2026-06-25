@@ -2,9 +2,176 @@
 {% load staticfiles %}
 
 {% block content %}
-<div style="padding:2em">
-<img src="{% static 'img/atlas.png' %}">
-Your environment server is up and running! 
-</div>
-{% endblock content %}
 
+<!-- Simple top bar -->
+<nav id="sim-nav">
+  <div style="display:flex;align-items:center;gap:10px;">
+    <div style="width:28px;height:28px;border-radius:6px;background:var(--surface3);
+                display:flex;align-items:center;justify-content:center;font-size:14px;">🏘</div>
+    <div style="font-size:13px;font-weight:600;color:var(--text);">Smallville · Start</div>
+  </div>
+</nav>
+
+<div style="max-width:760px;margin:32px auto;padding:0 20px;">
+
+  <!-- ============================ NEW RUN ============================ -->
+  <div style="background:var(--surface);border:1px solid var(--border);
+              border-radius:var(--radius-lg);padding:22px 24px;margin-bottom:24px;">
+    <div style="font-size:18px;font-weight:600;margin-bottom:4px;">Start a new run</div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:18px;">
+      Pick a town, an optional storyline, and a name. This hands the choice to your
+      running <span style="font-family:var(--font-mono);">reverie.py</span> terminal —
+      then type <span style="font-family:var(--font-mono);color:var(--text2);">run N</span> there to start the clock.
+    </div>
+
+    <!-- Town / base -->
+    <label style="display:block;font-size:11px;text-transform:uppercase;letter-spacing:.08em;
+                  color:var(--faint);margin-bottom:6px;">Town</label>
+    <select id="base-select" style="width:100%;margin-bottom:16px;background:var(--bg);
+            color:var(--text);border:1px solid var(--border);border-radius:var(--radius-md);
+            padding:10px 12px;font-size:14px;font-family:var(--font-ui);"></select>
+
+    <!-- Storyline / scenario -->
+    <label style="display:block;font-size:11px;text-transform:uppercase;letter-spacing:.08em;
+                  color:var(--faint);margin-bottom:6px;">Storyline</label>
+    <select id="scenario-select" style="width:100%;margin-bottom:4px;background:var(--bg);
+            color:var(--text);border:1px solid var(--border);border-radius:var(--radius-md);
+            padding:10px 12px;font-size:14px;font-family:var(--font-ui);"></select>
+    <div id="scenario-desc" style="font-size:12px;color:var(--muted);min-height:16px;
+                                   margin:6px 2px 16px;"></div>
+
+    <!-- Run name -->
+    <label style="display:block;font-size:11px;text-transform:uppercase;letter-spacing:.08em;
+                  color:var(--faint);margin-bottom:6px;">Run name</label>
+    <input id="run-name" type="text" placeholder="run-name"
+           style="width:100%;margin-bottom:18px;background:var(--bg);color:var(--text);
+                  border:1px solid var(--border);border-radius:var(--radius-md);
+                  padding:10px 12px;font-size:14px;font-family:var(--font-mono);outline:none;">
+
+    <button id="start-btn"
+            style="padding:11px 20px;background:var(--amber);border:none;border-radius:var(--radius-md);
+                   font-size:14px;font-weight:600;color:#0e0c0a;cursor:pointer;">
+      Start run
+    </button>
+
+    <div id="start-result" style="margin-top:16px;font-size:13px;line-height:1.6;"></div>
+  </div>
+
+  <!-- ========================= RECORDED RUNS ========================= -->
+  <div style="background:var(--surface);border:1px solid var(--border);
+              border-radius:var(--radius-lg);padding:22px 24px;">
+    <div style="font-size:18px;font-weight:600;margin-bottom:4px;">Open a recorded run</div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:16px;">
+      View or replay a storyline you've already run.
+    </div>
+    <div id="saved-list" style="display:flex;flex-direction:column;gap:8px;">
+      <div style="color:var(--faint);font-size:13px;">Loading…</div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  function el(tag, attrs, html) {
+    var e = document.createElement(tag);
+    if (attrs) for (var k in attrs) e.setAttribute(k, attrs[k]);
+    if (html != null) e.innerHTML = html;
+    return e;
+  }
+
+  var SCENARIOS = [];
+
+  fetch("{% url 'start_options' %}")
+    .then(function (r) { return r.json(); })
+    .then(function (data) {
+      // Towns
+      var bs = document.getElementById("base-select");
+      bs.innerHTML = "";
+      (data.bases || []).forEach(function (b) {
+        bs.appendChild(el("option", { value: b.code }, b.label));
+      });
+      if (!(data.bases || []).length) {
+        bs.appendChild(el("option", { value: "" }, "(no base sims found)"));
+      }
+
+      // Storylines
+      SCENARIOS = data.scenarios || [];
+      var ss = document.getElementById("scenario-select");
+      ss.innerHTML = "";
+      ss.appendChild(el("option", { value: "" }, "None — a normal day"));
+      SCENARIOS.forEach(function (s) {
+        ss.appendChild(el("option", { value: s.file }, s.name));
+      });
+      ss.onchange = function () {
+        var m = SCENARIOS.filter(function (s) { return s.file === ss.value; })[0];
+        document.getElementById("scenario-desc").textContent = m ? (m.description || "") : "";
+      };
+
+      // Suggested run name
+      var d = new Date();
+      var pad = function (n) { return (n < 10 ? "0" : "") + n; };
+      document.getElementById("run-name").value =
+        "run-" + pad(d.getMonth() + 1) + pad(d.getDate()) + "-" + pad(d.getHours()) + pad(d.getMinutes());
+
+      // Recorded runs
+      var sl = document.getElementById("saved-list");
+      sl.innerHTML = "";
+      var saved = data.saved || [];
+      if (!saved.length) {
+        sl.appendChild(el("div", { style: "color:var(--faint);font-size:13px;" }, "No recorded runs yet."));
+      }
+      saved.forEach(function (name) {
+        var row = el("div", { style: "display:flex;align-items:center;justify-content:space-between;" +
+                                      "gap:12px;padding:10px 12px;background:var(--surface2);" +
+                                      "border:1px solid var(--surface3);border-radius:var(--radius-md);" });
+        row.appendChild(el("span", { style: "font-family:var(--font-mono);font-size:12px;color:var(--text2);" +
+                                             "overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" }, name));
+        var a = el("a", { href: "/replay/" + encodeURIComponent(name) + "/1/",
+                          class: "mode-tab active",
+                          style: "flex-shrink:0;" }, "View ↗");
+        row.appendChild(a);
+        sl.appendChild(row);
+      });
+    })
+    .catch(function () {
+      document.getElementById("saved-list").innerHTML =
+        '<div style="color:var(--red);font-size:13px;">Could not load options.</div>';
+    });
+
+  document.getElementById("start-btn").onclick = function () {
+    var btn = this;
+    var origin = document.getElementById("base-select").value;
+    var scenario = document.getElementById("scenario-select").value || null;
+    var target = document.getElementById("run-name").value.trim();
+    var res = document.getElementById("start-result");
+    if (!origin) { res.style.color = "var(--red)"; res.textContent = "Pick a town first."; return; }
+    btn.disabled = true; btn.textContent = "Starting…";
+    res.style.color = "var(--muted)"; res.textContent = "";
+    fetch("{% url 'start_run' %}", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ origin: origin, target: target, scenario: scenario })
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        btn.disabled = false; btn.textContent = "Start run";
+        if (!d.ok) { res.style.color = "var(--red)"; res.textContent = d.error || "Failed to start."; return; }
+        res.style.color = "var(--text2)";
+        res.innerHTML =
+          'Requested run <b style="color:var(--amber);font-family:var(--font-mono);">' + d.request.target + '</b>. ' +
+          'Your <span style="font-family:var(--font-mono);">reverie.py</span> terminal is forking it now — ' +
+          'once it shows <span style="font-family:var(--font-mono);">Enter option:</span>, type ' +
+          '<span style="font-family:var(--font-mono);color:var(--text);">run N</span>, then:' +
+          '<div style="margin-top:10px;display:flex;gap:8px;">' +
+          '  <a class="mode-tab active" href="/simulator_home">Open simulator ↗</a>' +
+          '  <a class="mode-tab" style="border:1px solid var(--border);" href="/simulator_play?name=Alex">Play mode ↗</a>' +
+          '</div>';
+      })
+      .catch(function () {
+        btn.disabled = false; btn.textContent = "Start run";
+        res.style.color = "var(--red)"; res.textContent = "Network error.";
+      });
+  };
+</script>
+
+{% endblock content %}
