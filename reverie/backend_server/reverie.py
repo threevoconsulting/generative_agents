@@ -809,60 +809,116 @@ if __name__ == '__main__':
       "base_the_ville_n25": "25 agents (the full town)",
   }
 
-  # Discover what we can fork from: base_* (fresh starts) first, then any other
-  # saved simulations (to resume from where you left off).
-  all_sims = sorted(d for d in os.listdir(fs_storage)
-                    if os.path.isdir(f"{fs_storage}/{d}") and not d.startswith("."))
-  bases = [s for s in all_sims if s.startswith("base_")]
-  saved = [s for s in all_sims if not s.startswith("base_")]
-  menu = bases + saved
+  def _terminal_start():
+    # Discover what we can fork from: base_* (fresh starts) first, then any
+    # other saved simulations (to resume from where you left off).
+    all_sims = sorted(d for d in os.listdir(fs_storage)
+                      if os.path.isdir(f"{fs_storage}/{d}") and not d.startswith("."))
+    bases = [s for s in all_sims if s.startswith("base_")]
+    saved = [s for s in all_sims if not s.startswith("base_")]
+    menu = bases + saved
+
+    print()
+    print("=" * 62)
+    print("  Start a simulation -- pick what to fork from:")
+    print("=" * 62)
+    print("  Fresh start:")
+    for i, s in enumerate(bases):
+      print(f"     [{i}]  {FRIENDLY.get(s, s)}")
+    if saved:
+      print("  Resume a saved run:")
+      for i, s in enumerate(saved, start=len(bases)):
+        print(f"     [{i}]  {s}")
+    print("-" * 62)
+
+    choice = input("  Choose a number (or type a name) [0]: ").strip()
+    if choice == "" and menu:
+      origin = menu[0]
+    elif choice.isdigit() and int(choice) < len(menu):
+      origin = menu[int(choice)]
+    else:
+      origin = choice  # allow typing an exact name, as before
+
+    # Suggest a unique run name; just press Enter to accept it. Guaranteeing
+    # uniqueness avoids the classic "reused a name -> weird/stuck run" trap.
+    default_target = datetime.datetime.now().strftime("run-%b%d-%H%M").lower()
+    target = input(f"  Name this run [{default_target}]: ").strip() or default_target
+    while os.path.isdir(f"{fs_storage}/{target}"):
+      target += "-1"
+
+    # Optional: seed a story premise (murder, break-in, scandal...). Scenario
+    # files live in ./scenarios/*.json. Press Enter for a normal run.
+    scenario = None
+    scen_dir = "scenarios"
+    scen_files = (sorted(f for f in os.listdir(scen_dir) if f.endswith(".json"))
+                  if os.path.isdir(scen_dir) else [])
+    if scen_files:
+      print()
+      print("  Apply a scenario? (Enter = none)")
+      for i, f in enumerate(scen_files):
+        try:
+          nm = json.load(open(f"{scen_dir}/{f}")).get("name", f)
+        except Exception:
+          nm = f
+        print(f"     [{i}]  {nm}")
+      sc = input("  Scenario number [none]: ").strip()
+      if sc.isdigit() and int(sc) < len(scen_files):
+        scenario = json.load(open(f"{scen_dir}/{scen_files[int(sc)]}"))
+    return origin, target, scenario
+
+  def _browser_start():
+    # Wait for the browser start screen (the landing page at
+    # http://localhost:8000/) to hand us a choice. The frontend writes the
+    # selection to temp_storage/pending_start.json; we poll for it, fork from
+    # it, and proceed. 'run N' is still typed here in the terminal afterward.
+    req_file = f"{fs_temp_storage}/pending_start.json"
+    if os.path.exists(req_file):
+      try:
+        os.remove(req_file)              # clear any stale request
+      except OSError:
+        pass
+    print()
+    print("=" * 62)
+    print("  Waiting for you to start a run in the browser...")
+    print("     open  http://localhost:8000/")
+    print("  (or press Ctrl+C to use the terminal menu instead)")
+    print("=" * 62)
+    while True:
+      if os.path.exists(req_file):
+        try:
+          req = json.load(open(req_file))
+        except Exception:
+          time.sleep(0.5)
+          continue
+        try:
+          os.remove(req_file)
+        except OSError:
+          pass
+        origin = req.get("origin")
+        target = (req.get("target") or "run").strip() or "run"
+        scenario = None
+        scen_file = req.get("scenario")
+        if scen_file:
+          p = os.path.join("scenarios", os.path.basename(scen_file))
+          if os.path.isfile(p):
+            scenario = json.load(open(p))
+        while os.path.isdir(f"{fs_storage}/{target}"):
+          target += "-1"
+        print(f"\n  Received from browser: fork '{origin}' -> '{target}'"
+              + (f"  [scenario: {scenario['name']}]" if scenario else ""))
+        return origin, target, scenario
+      time.sleep(0.5)
 
   print()
-  print("=" * 62)
-  print("  Start a simulation -- pick what to fork from:")
-  print("=" * 62)
-  print("  Fresh start:")
-  for i, s in enumerate(bases):
-    print(f"     [{i}]  {FRIENDLY.get(s, s)}")
-  if saved:
-    print("  Resume a saved run:")
-    for i, s in enumerate(saved, start=len(bases)):
-      print(f"     [{i}]  {s}")
-  print("-" * 62)
-
-  choice = input("  Choose a number (or type a name) [0]: ").strip()
-  if choice == "" and menu:
-    origin = menu[0]
-  elif choice.isdigit() and int(choice) < len(menu):
-    origin = menu[int(choice)]
+  start_mode = input("  Start in the [b]rowser or the [t]erminal? [b]: ").strip().lower()
+  if start_mode == "t":
+    origin, target, scenario = _terminal_start()
   else:
-    origin = choice  # allow typing an exact name, as before
-
-  # Suggest a unique run name; just press Enter to accept it. Guaranteeing
-  # uniqueness avoids the classic "reused a name -> weird/stuck run" trap.
-  default_target = datetime.datetime.now().strftime("run-%b%d-%H%M").lower()
-  target = input(f"  Name this run [{default_target}]: ").strip() or default_target
-  while os.path.isdir(f"{fs_storage}/{target}"):
-    target += "-1"
-
-  # Optional: seed a story premise (murder, break-in, scandal...). Scenario
-  # files live in ./scenarios/*.json. Press Enter for a normal run.
-  scenario = None
-  scen_dir = "scenarios"
-  scen_files = (sorted(f for f in os.listdir(scen_dir) if f.endswith(".json"))
-                if os.path.isdir(scen_dir) else [])
-  if scen_files:
-    print()
-    print("  Apply a scenario? (Enter = none)")
-    for i, f in enumerate(scen_files):
-      try:
-        nm = json.load(open(f"{scen_dir}/{f}")).get("name", f)
-      except Exception:
-        nm = f
-      print(f"     [{i}]  {nm}")
-    sc = input("  Scenario number [none]: ").strip()
-    if sc.isdigit() and int(sc) < len(scen_files):
-      scenario = json.load(open(f"{scen_dir}/{scen_files[int(sc)]}"))
+    try:
+      origin, target, scenario = _browser_start()
+    except KeyboardInterrupt:
+      print("\n  Switching to the terminal menu.")
+      origin, target, scenario = _terminal_start()
 
   print()
   print(f"  Forking '{origin}'  ->  '{target}'"

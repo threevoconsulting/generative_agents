@@ -24,6 +24,8 @@ from translator import views as translator_views
 urlpatterns = [
     url(r'^$', translator_views.landing, name='landing'),
     url(r'^simulator_home$', translator_views.home, name='home'),
+    url(r'^start_options/$', translator_views.start_options, name='start_options'),
+    url(r'^start_run/$', translator_views.start_run, name='start_run'),
     url(r'^simulator_play$', translator_views.play, name='play'),
     url(r'^player_chat/$', translator_views.player_chat, name='player_chat'),
     url(r'^player_chat_response/$', translator_views.player_chat_response, name='player_chat_response'),
