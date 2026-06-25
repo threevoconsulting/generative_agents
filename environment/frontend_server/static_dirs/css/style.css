@@ -1,19 +1,203 @@
-html,
-body,
-#game-container {
-  margin: 0;
-  padding: 0;
+/* ── Design Tokens ──────────────────────────────────────────────────── */
+:root {
+  --bg:          #0e0c0a;
+  --surface:     #1a1714;
+  --surface2:    #211e1a;
+  --surface3:    #2a2520;
+  --border:      #36302a;
+  --text:        #f0e8dc;
+  --text2:       #b8ad9f;
+  --muted:       #8a7d6e;
+  --faint:       #5a5249;
+
+  --amber:       #d4894a;
+  --amber-dim:   rgba(212,137,74,0.15);
+  --green:       #5ba85a;
+  --green-dim:   rgba(91,168,90,0.15);
+  --blue:        #5b8fd4;
+  --red:         #d45b5b;
+
+  --radius-sm:   5px;
+  --radius-md:   8px;
+  --radius-lg:   12px;
+
+  --font-ui:     'Outfit', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  --font-mono:   'IBM Plex Mono', 'Courier New', monospace;
 }
 
+/* ── Reset & Base ───────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* ── Game Canvas ────────────────────────────────────────────────────── */
 #game-container {
-  /*min-width: 100vw;
-  min-height: 100vh;*/
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;   /* required for thinking-overlay to position correctly */
+}
+
+#game-container > canvas {
+  border-radius: var(--radius-sm);
+  display: block;
+}
+
+/* ── Navigation ─────────────────────────────────────────────────────── */
+#sim-nav {
+  height: 48px;
+  background: #14120f;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  gap: 0;
+  position: sticky;
+  top: 0;
+  z-index: 200;
+}
+
+/* ── Simulator Layout ───────────────────────────────────────────────── */
+#sim-layout {
+  display: flex;
+  height: calc(100vh - 48px);
+  overflow: hidden;
+}
+
+#sim-canvas-wrap {
+  flex: 1;
+  min-width: 0;
+  position: relative;
+  overflow: hidden;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
-#game-container>canvas {
-  border-radius: 5px;
+#sim-sidebar {
+  width: 320px;
+  flex-shrink: 0;
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
+/* ── Sidebar Agent Cards ────────────────────────────────────────────── */
+.agent-card {
+  padding: 11px 16px;
+  border-bottom: 1px solid var(--surface2);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.agent-card:hover { background: var(--surface2); }
+.agent-card.active { background: var(--amber-dim); }
+
+/* ── Mode Tabs ──────────────────────────────────────────────────────── */
+.mode-tab {
+  padding: 5px 14px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  color: var(--muted);
+  transition: background 0.15s, color 0.15s;
+  border: none;
+  background: transparent;
+  text-decoration: none;
+  display: inline-block;
+}
+.mode-tab:hover { color: var(--text2); text-decoration: none; }
+.mode-tab.active {
+  background: var(--amber);
+  color: #0e0c0a;
+  font-weight: 600;
+}
+
+/* ── Canvas Overlay Controls ────────────────────────────────────────── */
+.canvas-ctrl {
+  background: rgba(14,12,10,0.82);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 5px 10px;
+  font-size: 12px;
+  color: var(--text2);
+  cursor: pointer;
+  backdrop-filter: blur(4px);
+  transition: color 0.15s;
+  font-family: var(--font-mono);
+}
+.canvas-ctrl:hover { color: var(--text); }
+
+/* ── Chat Panel ─────────────────────────────────────────────────────── */
+#player-chat-panel {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  width: 340px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+  z-index: 1000;
+  overflow: hidden;
+  font-family: var(--font-ui);
+}
+
+.chat-msg-agent {
+  background: var(--surface2);
+  border: 1px solid var(--surface3);
+  border-radius: 3px 10px 10px 10px;
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--text);
+  max-width: 80%;
+}
+
+.chat-msg-player {
+  background: #2a2018;
+  border: 1px solid #3a3028;
+  border-radius: 10px 3px 10px 10px;
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--text);
+  max-width: 80%;
+  margin-left: auto;
+}
+
+/* ── Thinking dot pulse ─────────────────────────────────────────────── */
+@keyframes thinking-pulse {
+  0%, 100% { opacity: 0.35; }
+  50%      { opacity: 1; }
+}
+#thinking-dot { animation: thinking-pulse 1.2s ease-in-out infinite; }
+
+/* ── Bootstrap 3 overrides ──────────────────────────────────────────── */
+/* Keep Bootstrap 3 layout utilities but neutralize its visual styling   */
+.btn-default {
+  background: var(--surface3) !important;
+  border-color: var(--border) !important;
+  color: var(--text2) !important;
+}
+.btn-default:hover, .btn-default:focus {
+  background: var(--surface2) !important;
+  color: var(--text) !important;
+}
+.btn-default.active {
+  background: var(--amber-dim) !important;
+  border-color: var(--amber) !important;
+  color: var(--amber) !important;
+}
+body { background-color: var(--bg) !important; }
+
+/* ── Hide ClustrMaps ────────────────────────────────────────────────── */
+#clustrmaps-widget-v2 { display: none !important; }

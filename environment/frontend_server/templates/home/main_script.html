@@ -166,17 +166,28 @@
 	  return false;
 	};
 
-	// Tiny transport indicator: green dot = live WebSocket, grey = polling.
+	// Transport indicator: green = live WebSocket, grey = polling. Prefer the
+	// status dot/label baked into the nav bar (home.html); only fall back to a
+	// floating corner dot when the page has no nav indicator.
 	(function () {
-	  let dot = document.createElement("div");
-	  dot.id = "ws-status-dot";
-	  dot.style.cssText = "position:fixed; top:8px; right:8px; width:12px;" +
-	    " height:12px; border-radius:50%; background:#bbb; z-index:2000;" +
-	    " box-shadow:0 0 4px rgba(0,0,0,0.4);";
-	  document.body.appendChild(dot);
+	  let dot = document.getElementById("ws-status-dot");
+	  let label = document.getElementById("ws-status-label");
+	  if (!dot) {
+	    dot = document.createElement("div");
+	    dot.id = "ws-status-dot";
+	    dot.style.cssText = "position:fixed; top:8px; right:8px; width:12px;" +
+	      " height:12px; border-radius:50%; background:#bbb; z-index:2000;" +
+	      " box-shadow:0 0 4px rgba(0,0,0,0.4);";
+	    document.body.appendChild(dot);
+	  }
 	  setInterval(function () {
-	    if (wsReady()) { dot.style.background = "#2ecc40"; dot.title = "Live (WebSocket)"; }
-	    else { dot.style.background = "#bbb"; dot.title = "Polling (no WebSocket)"; }
+	    if (wsReady()) {
+	      dot.style.background = "#2ecc40"; dot.title = "Live (WebSocket)";
+	      if (label) { label.textContent = "Live"; label.style.color = "#5ba85a"; }
+	    } else {
+	      dot.style.background = "#bbb"; dot.title = "Polling (no WebSocket)";
+	      if (label) { label.textContent = "Polling"; label.style.color = "var(--muted)"; }
+	    }
 	  }, 500);
 	})();
 
@@ -255,6 +266,13 @@
 	let execute_count_max = tile_width/movement_speed;
 	let execute_count = execute_count_max;
 	let movement_target = {};
+
+	// *** WORLD-FX STATE ***
+	// Per-persona particle emitters for the sleeping "Zzz" rise and the
+	// footstep dust burst. Keyed by persona name; created lazily and torn
+	// down when no longer needed. (See Phaser FX patches in update().)
+	let zzz_emitters = {};
+	let dust_emitters = {};
 	
 
 	// ###########################################################################
@@ -438,6 +456,35 @@
 	  // Expose the camera so the on-screen touch zoom buttons can drive it.
 	  window.game_camera = camera;
 
+	  // Move the agent name tooltip with the cursor while it is visible.
+	  this.input.on('pointermove', function (ptr) {
+	    var tip = document.getElementById('sprite-tooltip');
+	    if (tip && tip.style.display === 'block') {
+	      tip.style.left = (ptr.x + 14) + 'px';
+	      tip.style.top  = (ptr.y - 8)  + 'px';
+	    }
+	  });
+
+	  // *** WORLD-FX TEXTURES ***
+	  // Generate two tiny circle textures used by the particle emitters: a
+	  // blue-grey "Zzz" mote for sleepers and a brown dust speck for footsteps.
+	  try {
+	    if (!this.textures.exists('zzz_particle')) {
+	      var zzz_gfx = this.add.graphics();
+	      zzz_gfx.fillStyle(0x8aaac8, 1);
+	      zzz_gfx.fillCircle(4, 4, 4);
+	      zzz_gfx.generateTexture('zzz_particle', 8, 8);
+	      zzz_gfx.destroy();
+	    }
+	    if (!this.textures.exists('dust_particle')) {
+	      var dust_gfx = this.add.graphics();
+	      dust_gfx.fillStyle(0x8a7050, 1);
+	      dust_gfx.fillCircle(3, 3, 3);
+	      dust_gfx.generateTexture('dust_particle', 6, 6);
+	      dust_gfx.destroy();
+	    }
+	  } catch (e) { console.warn('world-fx texture gen failed', e); }
+
 	  // *** FOCUS MODE ***
 	  // Follow a chosen agent ("through their eyes"), switchable live while you
 	  // watch. unfocus() returns to the free-roam camera (the invisible player
@@ -500,12 +547,41 @@
 	    // Here, we are creating the persona and its pronunciatio sprites.
 	    personas[persona_name] = new_sprite;
 
-	    // One hidden speech-bubble image per persona; shown (and sized to the
-	    // current line) only while they are the active speaker.
-	    speech_bubbles[persona_name] = this.add.image(
-	                                    start_pos[0],
-	                                    start_pos[1] - sprite_disp_size - 30,
-	                                    'speech_bubble')
+	    // *** CLICKABLE SPRITES ***
+	    // Click/tap any agent to focus the camera on them and surface their
+	    // sidebar card (showAgentPanel is defined in home.html). Hover dims the
+	    // sprite slightly and shows a name tooltip that tracks the cursor.
+	    (function (pname, sprite) {
+	      sprite.setInteractive({ useHandCursor: true });
+	      sprite.on('pointerdown', function () {
+	        if (typeof window.showAgentPanel === 'function') window.showAgentPanel(pname);
+	        else if (typeof window.focusPersona === 'function') window.focusPersona(pname);
+	      });
+	      sprite.on('pointerover', function () {
+	        this.setAlpha(0.82);
+	        var tip = document.getElementById('sprite-tooltip');
+	        if (tip) { tip.textContent = pname; tip.style.display = 'block'; }
+	      });
+	      sprite.on('pointerout', function () {
+	        this.setAlpha(1.0);
+	        var tip = document.getElementById('sprite-tooltip');
+	        if (tip) tip.style.display = 'none';
+	      });
+	    })(persona_name, new_sprite);
+
+	    // *** OBJECT-TILE GLOW ***
+	    // One Graphics object per persona; in update() it draws a soft pulsing
+	    // rectangle on the tile of whatever game object the agent is using.
+	    var obj_glow_graphics = this.add.graphics();
+	    obj_glow_graphics.setDepth(new_sprite.body.y - 1);
+	    window['obj_glow_' + persona_name] = obj_glow_graphics;
+
+	    // One hidden speech-bubble per persona, drawn as a Phaser Graphics object
+	    // (a crisp rounded rectangle with a drop shadow and a pointed tail)
+	    // instead of a stretched PNG. Shown and redrawn around the current line
+	    // only while they are the active speaker. The same key is reused so the
+	    // rest of the bubble logic (visibility, depth, layoutBubbles) is intact.
+	    speech_bubbles[persona_name] = this.add.graphics()
 	                                   .setVisible(false)
 	                                   .setDepth(BUBBLE_DEPTH + new_sprite.body.y - 1);
 
@@ -633,7 +709,26 @@
 
 
 	function update(time, delta) {
-		// *** SETUP PLAY AND PAUSE BUTTON *** 
+		// Scene handle for the world-FX particle emitters created below.
+		var curr_scene = this;
+
+		// *** THINKING STATE OVERLAY ***
+		// While the backend computes the next step (phase === "update"), pulse an
+		// amber inner border around the canvas and show a small status chip. The
+		// overlay element lives in home.html inside #sim-canvas-wrap.
+		(function () {
+		  var overlay = document.getElementById('thinking-overlay');
+		  if (!overlay) return;
+		  var label = document.getElementById('thinking-label');
+		  if (phase === 'update') {
+		    overlay.style.display = 'block';
+		    if (label) label.textContent = 'Step ' + step + ' · Agents reflecting…';
+		  } else {
+		    overlay.style.display = 'none';
+		  }
+		})();
+
+		// *** SETUP PLAY AND PAUSE BUTTON ***
 		let play_context = this;
 		function game_resume() {  
 			play_context.scene.resume();
@@ -855,6 +950,68 @@
         curr_pronunciatio.setBackgroundColor("#ffffff");
         curr_bubble.setVisible(false);
       }
+
+      // *** SLEEPING "Zzz" PARTICLES ***
+      // Float a slow stream of motes above any agent whose current action is
+      // sleeping; tear the emitter down once they are no longer asleep.
+      (function () {
+        var pinfo = execute_movement["persona"][curr_persona_name] || {};
+        var sleeping = ((pinfo["description"] || "").toLowerCase().indexOf("sleep") >= 0);
+        if (sleeping) {
+          try {
+            var px = curr_persona.body.x + tile_width / 2;
+            var py = curr_persona.body.y - sprite_disp_size / 2;
+            var z = zzz_emitters[curr_persona_name];
+            if (!z) {
+              var zp = curr_scene.add.particles('zzz_particle');
+              var zem = zp.createEmitter({
+                x: px, y: py,
+                speedY: { min: -55, max: -28 },
+                speedX: { min: -8, max: 8 },
+                alpha:  { start: 0.9, end: 0 },
+                scale:  { start: 0.4, end: 1.1 },
+                lifespan: 2200,
+                frequency: 750,
+                quantity: 1
+              });
+              zp.setDepth(BUBBLE_DEPTH + curr_persona.body.y + 1);
+              zzz_emitters[curr_persona_name] = { mgr: zp, em: zem };
+            } else {
+              z.em.setPosition(px, py);
+              z.mgr.setDepth(BUBBLE_DEPTH + curr_persona.body.y + 1);
+            }
+          } catch (e) { /* particle API mismatch -- skip zzz */ }
+        } else if (zzz_emitters[curr_persona_name]) {
+          try { zzz_emitters[curr_persona_name].mgr.destroy(); } catch (e) {}
+          delete zzz_emitters[curr_persona_name];
+        }
+      })();
+
+      // *** OBJECT-TILE GLOW ***
+      // Softly pulse a colored rectangle on the tile of the game object the
+      // agent is settled on (blue = bed, amber = seat, red = appliance).
+      (function () {
+        var gfx = window['obj_glow_' + curr_persona_name];
+        if (!gfx) return;
+        gfx.clear();
+        var pinfo = execute_movement["persona"][curr_persona_name] || {};
+        var pose = pinfo["object_pose"];
+        var mt = movement_target[curr_persona_name];
+        var settled = mt && curr_persona.body.x === mt[0] && curr_persona.body.y === mt[1];
+        if (!pose || !pose["anchor_tile"] || !settled) return;
+        var wx = pose["anchor_tile"][0] * tile_width;
+        var wy = pose["anchor_tile"][1] * tile_width;
+        var obj_name = (pose["object"] || "").toLowerCase();
+        var color;
+        if (obj_name.indexOf("bed") >= 0 || obj_name.indexOf("bunk") >= 0) color = 0x5b8fd4;
+        else if (SEAT_OBJECTS.some(function (o) { return obj_name.indexOf(o) >= 0; })) color = 0xd4894a;
+        else color = 0xd44a4a;
+        var alpha = 0.22 + 0.16 * Math.sin(time / 600);
+        gfx.fillStyle(color, alpha);
+        gfx.fillRoundedRect(wx, wy, tile_width, tile_width, 4);
+        gfx.setDepth(curr_persona.body.y - 1);
+      })();
+
 	      if (execute_count > 0) {
 	        if (curr_persona.body.x < movement_target[curr_persona_name][0]) {
 	          curr_persona.body.x += movement_speed; 
@@ -880,6 +1037,32 @@
 	        	anims_direction = "";
 	        }
 
+	        // *** FOOTSTEP DUST ***
+	        // Emit a small dust burst at the agent's feet at the midpoint of
+	        // each tile crossing, but only while they are actually moving.
+	        if (anims_direction !== "" &&
+	            execute_count === Math.floor(execute_count_max / 2)) {
+	          try {
+	            var de = dust_emitters[curr_persona_name];
+	            if (!de) {
+	              var dp = curr_scene.add.particles('dust_particle');
+	              de = dp.createEmitter({
+	                lifespan: 350,
+	                speedX: { min: -18, max: 18 },
+	                speedY: { min: -20, max: -8 },
+	                alpha:  { start: 0.6, end: 0 },
+	                scale:  { start: 0.6, end: 0.1 },
+	                frequency: -1,
+	                quantity: 3
+	              });
+	              dp.setDepth(curr_persona.body.y - 1);
+	              dust_emitters[curr_persona_name] = de;
+	            }
+	            de.explode(3, curr_persona.body.x + tile_width / 2,
+	                          curr_persona.body.y + tile_width - 4);
+	          } catch (e) { /* particle API mismatch -- skip dust */ }
+	        }
+
 	        // Keep the pronunciatio/dialogue bottom-centered above the agent's
 	        // head, and Y-sort everything: the agent at its feet (painter's
 	        // algorithm, so lower agents draw in front of higher ones), the
@@ -893,15 +1076,31 @@
           curr_persona.setDepth(curr_persona.body.y);
           curr_pronunciatio.setDepth(BUBBLE_DEPTH + curr_persona.body.y);
           if (curr_bubble.visible) {
-            // Fit the bubble art around the current dialogue line, leaving
-            // room below the text for the bubble's tail.
-            curr_bubble.displayWidth = curr_pronunciatio.width + BUBBLE_PAD_X * 2;
-            curr_bubble.displayHeight = curr_pronunciatio.height
-                                        + BUBBLE_PAD_TOP + BUBBLE_TAIL;
+            // Draw the bubble fresh each frame as a rounded rectangle with a
+            // soft drop shadow and a downward tail, sized around the current
+            // dialogue line. Geometry is drawn in local space centered on the
+            // graphics origin, then the whole object is positioned (and later
+            // de-overlapped by layoutBubbles) via its x/y -- mirroring how the
+            // old PNG image was anchored.
+            var pad_x = BUBBLE_PAD_X, pad_top = BUBBLE_PAD_TOP, tail = BUBBLE_TAIL;
+            var tw = curr_pronunciatio.width + pad_x * 2;
+            var total_h = curr_pronunciatio.height + pad_top + tail;
+            var bodyH = total_h - tail;
+            var left = -tw / 2, top = -total_h / 2;
+            curr_bubble.clear();
+            // Drop shadow.
+            curr_bubble.fillStyle(0x000000, 0.12);
+            curr_bubble.fillRoundedRect(left + 2, top + 2, tw, bodyH, 8);
+            // Bubble body.
+            curr_bubble.fillStyle(0xf5f0e8, 0.94);
+            curr_bubble.fillRoundedRect(left, top, tw, bodyH, 8);
+            // Tail pointing down toward the speaker.
+            var ty = top + bodyH;
+            curr_bubble.fillTriangle(-6, ty, 6, ty, 0, ty + tail);
             curr_bubble.x = curr_pronunciatio.x;
             curr_bubble.y = curr_pronunciatio.y
                             - curr_pronunciatio.height / 2
-                            + (BUBBLE_TAIL - BUBBLE_PAD_TOP) / 2;
+                            + (tail - pad_top) / 2;
             curr_bubble.setDepth(BUBBLE_DEPTH + curr_persona.body.y - 1);
           }
 
@@ -971,7 +1170,9 @@
 			                 APPLIANCE_OBJECTS.some(function (o) { return idle_obj.indexOf(o) >= 0; })) {
 			        // Facing away from the camera reads as working at the
 			        // appliance (counters/sinks/desks sit against upper walls).
-			        curr_persona.setTexture(curr_persona_name, "up");
+			        // Prefer a dedicated "lean" frame if the sheet ships one.
+			        curr_persona.setTexture(curr_persona_name,
+			                                char_tex.has("lean") ? "lean" : "up");
 			      }
 			    };
 
@@ -1016,9 +1217,15 @@
 		      }
 	        // action_description += description_content + "<br>";
 
-	        document.getElementById("current_action__"+curr_persona_name_os).innerHTML = description_content.split("@")[0];
-	        document.getElementById("target_address__"+curr_persona_name_os).innerHTML = description_content.split("@")[1];
-	        document.getElementById("chat__"+curr_persona_name_os).innerHTML = chat_content;
+	        // Defensive lookups: the sidebar markup can differ between layouts
+	        // (e.g. the chat line is hidden in the redesigned sidebar), so never
+	        // assume an element exists -- a missing node must not break the loop.
+	        let el_action = document.getElementById("current_action__"+curr_persona_name_os);
+	        let el_addr   = document.getElementById("target_address__"+curr_persona_name_os);
+	        let el_chat   = document.getElementById("chat__"+curr_persona_name_os);
+	        if (el_action) el_action.innerHTML = description_content.split("@")[0];
+	        if (el_addr)   el_addr.innerHTML   = description_content.split("@")[1];
+	        if (el_chat)   el_chat.innerHTML   = chat_content;
 	      }
 	      
 	    }
