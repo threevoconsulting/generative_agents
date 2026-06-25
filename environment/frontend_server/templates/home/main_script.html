@@ -337,11 +337,17 @@
 	  // Per-character sprite sheets: each agent gets their own look. Every sheet
 	  // (Isabella_Rodriguez.png, etc.) shares the same frame layout defined in
 	  // assets/characters/atlas.json. We key each atlas by the persona's name.
+	  // ASSET_VER busts the browser cache when the sheets/atlas change (Phaser
+	  // fetches these itself, so a plain page refresh can keep stale copies that
+	  // lack newer frames like "lie"/"sit"/"lean"). Bump it when the character
+	  // art or atlas.json changes.
+	  var ASSET_VER = "20260625b";
 	  var char_json = "{% static 'assets/characters/atlas.json' %}";
 	  var char_base = char_json.replace("atlas.json", "");
 	  for (var pkey in persona_names) {
-	    this.load.atlas(pkey, char_base + pkey.replace(/ /g, "_") + ".png",
-	                    char_json);
+	    this.load.atlas(pkey,
+	                    char_base + pkey.replace(/ /g, "_") + ".png?v=" + ASSET_VER,
+	                    char_json + "?v=" + ASSET_VER);
 	  }
 
 	  // Speech-bubble art shown behind the active speaker's dialogue line.
@@ -1146,22 +1152,22 @@
 			      let char_tex = this.textures.get(curr_persona_name);
 			      curr_persona.setAngle(0);
 			      if (GROUND_SLEEP && idle_desc.indexOf("sleep") >= 0) {
-			        if (char_tex.has("lie")) {
+			        if (idle_obj.indexOf("bed") >= 0 && char_tex.has("lie")) {
+			          // In-bed pose: head on the pillow with a blanket over the body,
+			          // drawn vertically (head up). The Ville's beds are all drawn
+			          // headboard-up -- the walkable "bed" tiles are just the pillow
+			          // row (a double bed is two pillow tiles side by side) and the
+			          // bed body extends downward -- so a head-up pose aligns with
+			          // every bed with NO rotation. (setAngle(0) above guarantees it.)
 			          curr_persona.setTexture(curr_persona_name, "lie");
 			        } else if (idle_obj.indexOf("bed") >= 0) {
-			          // Tucked-in look: face the camera, upright, on the bed's
-			          // pillow row. NEVER rotate from the cluster's orient: the
-			          // walkable "bed" tiles are just the pillow row (a double bed
-			          // is 2 tiles side by side, reading as "horizontal"), while
-			          // every bed in the Ville is drawn headboard-up -- rotating
-			          // by cluster shape is what left sleepers lying sideways
-			          // across their beds.
+			          // No in-bed frame in this sheet: face the camera, upright, on
+			          // the bed's pillow row.
 			          curr_persona.setTexture(curr_persona_name, "down");
 			        }
 			        // Sleeping anywhere that isn't a bed (the sim sometimes parks
 			        // a sleeper at a toilet or shower): stay upright -- the zzz
-			        // chip carries the meaning; lying sideways on a toilet does
-			        // not.
+			        // chip carries the meaning; a blanket on a toilet does not.
 			      } else if (idle_obj &&
 			                 SEAT_OBJECTS.some(function (o) { return idle_obj.indexOf(o) >= 0; })) {
 			        curr_persona.setTexture(curr_persona_name,
