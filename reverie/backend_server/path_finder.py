@@ -64,20 +64,24 @@ def _bfs_path(collision_maze, start_rc, end_rc, collision_block_char):
     if start_rc == end_rc:
         return [start_rc]
 
-    # ── If the end tile is a wall, nudge to the nearest walkable neighbor ─────
-    # This happens when the LLM targets an object tile that carries a collision
-    # flag (e.g., the back row of a counter).  Rather than returning "no path",
-    # we path to the adjacent walkable tile closest to the agent.
+    # ── Build the set of acceptable goal tiles ───────────────────────────────
+    # Normally the single end tile. But if the end tile is a wall (the LLM
+    # targeted an object tile that carries a collision flag, e.g. the back row
+    # of a counter), accept ANY walkable neighbor of it. We hand the whole set
+    # to BFS rather than committing to the first neighbor in a fixed order: that
+    # first neighbor might itself be an isolated pocket, while another neighbor
+    # is reachable. BFS then settles on whichever goal it reaches first (the
+    # nearest reachable one).
     if collision_maze[er][ec] == collision_block_char:
-        nudged = False
+        goals = set()
         for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
             nr, nc = er + dr, ec + dc
             if in_bounds(nr, nc) and collision_maze[nr][nc] != collision_block_char:
-                er, ec = nr, nc
-                nudged = True
-                break
-        if not nudged:
+                goals.add((nr, nc))
+        if not goals:
             return [start_rc]   # end completely walled off
+    else:
+        goals = {(er, ec)}
 
     # ── BFS ───────────────────────────────────────────────────────────────────
     visited = [[False] * cols for _ in range(rows)]
@@ -85,12 +89,12 @@ def _bfs_path(collision_maze, start_rc, end_rc, collision_block_char):
 
     visited[sr][sc] = True
     queue = deque([(sr, sc)])
-    found = False
+    reached = None
 
     while queue:
         r, c = queue.popleft()
-        if (r, c) == (er, ec):
-            found = True
+        if (r, c) in goals:
+            reached = (r, c)
             break
         for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
             nr, nc = r + dr, c + dc
@@ -101,12 +105,12 @@ def _bfs_path(collision_maze, start_rc, end_rc, collision_block_char):
                 parent[(nr, nc)] = (r, c)
                 queue.append((nr, nc))
 
-    if not found:
+    if reached is None:
         return [start_rc]
 
     # ── Reconstruct path ──────────────────────────────────────────────────────
     path = []
-    node = (er, ec)
+    node = reached
     while node != (sr, sc):
         path.append(node)
         node = parent[node]
@@ -334,5 +338,24 @@ if __name__ == "__main__":
     p5 = path_finder(m4, (1,1), (0,0), WALL)   # (0,0) is a wall
     assert p5[0] == (1,1), "Should start at (1,1)"
     print("Test 5 PASSED — end is wall, nudged:", p5)
+
+    # Wall end whose first-checked neighbor (UP) is an isolated open pocket,
+    # while the LEFT neighbor is reachable. The old fixed-order nudge would
+    # commit to the isolated UP tile and return [start]; the goal-set BFS must
+    # instead reach the reachable LEFT neighbor.
+    #   (row, col):  P=(1,2) isolated open, E=(2,2) wall end,
+    #                (2,1) reachable left neighbor, S=(3,1) start
+    m5 = [
+        [W, W, W, W, W],
+        [W, W, O, W, W],   # (1,2) open but walled off on every side
+        [W, O, W, W, W],   # (2,1) open, (2,2) wall = target
+        [W, O, W, W, W],   # (3,1) start
+        [W, W, W, W, W],
+    ]
+    p6 = path_finder(m5, (1, 3), (2, 2), WALL)   # start xy=(col1,row3), end xy=(col2,row2)
+    assert p6[0] == (1, 3), f"Should start at (1,3), got {p6[0]}"
+    assert p6[-1] == (1, 2), f"Should reach reachable left neighbor (1,2), got {p6[-1]}"
+    assert len(p6) == 2, f"Expected a 2-tile path, got {p6}"
+    print("Test 6 PASSED — wall end, isolated neighbor skipped:", p6)
 
     print("\nAll tests passed ✓")

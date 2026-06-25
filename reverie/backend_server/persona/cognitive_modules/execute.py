@@ -205,12 +205,21 @@ def execute(persona, maze, personas, plan):
     persona.scratch.planned_path = path[1:]
     persona.scratch.act_path_set = True
 
-    # If BFS found no route (path_finder returned just [curr_tile], so
-    # path[1:] is empty), reset act_path_set so the cognitive loop picks a
-    # new action on the next step instead of freezing the agent permanently
-    # in place with an empty planned_path.
+    # An empty planned_path (path == [curr_tile]) arises in two situations:
+    #   (a) the chosen target IS the current tile -- the agent is already
+    #       settled on it (e.g. acting on a multi-tile object or arena it is
+    #       standing on). It must stay put; resetting here would re-sample
+    #       target tiles next tick and the occupied-tile filter could send the
+    #       agent wandering off the object for the same action.
+    #   (b) the target is genuinely unreachable. Only here do we reset
+    #       act_path_set, so the cognitive loop picks a new action next step
+    #       instead of freezing the agent permanently in place.
+    # Distinguish them by whether the picked target equals the current tile.
     if not persona.scratch.planned_path:
-      persona.scratch.act_path_set = False
+      already_settled = (closest_target_tile is not None and
+                         tuple(closest_target_tile) == tuple(curr_tile))
+      if not already_settled:
+        persona.scratch.act_path_set = False
 
   # Setting up the next immediate step. We stay at our curr_tile if there is
   # no <planned_path> left, but otherwise, we go to the next tile in the path.

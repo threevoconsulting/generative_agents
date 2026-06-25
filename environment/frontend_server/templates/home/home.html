@@ -121,6 +121,12 @@
 						<div id="target_address__{{ p_name_os }}"
 						     style="font-family:var(--font-mono);font-size:10px;color:var(--faint);margin-top:2px;
 						            white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></div>
+						<!-- Open the agent's full memory/state page. stopPropagation keeps
+						     the click from also firing the card's focus handler. -->
+						<a href="{% url 'replay_persona_state' sim_code step p_name_os %}"
+						   onclick="event.stopPropagation();"
+						   style="display:inline-block;margin-top:5px;font-size:10px;color:var(--amber);
+						          text-decoration:none;">State Details ↗</a>
 						<!-- Latest conversation line (kept hidden; surfaced in the feed below). -->
 						<span id="chat__{{ p_name_os }}" style="display:none;"></span>
 					</div>
@@ -157,13 +163,6 @@
 
 	</div><!-- end #sim-sidebar -->
 </div><!-- end #sim-layout -->
-
-
-<!-- State Details links (hidden — opened from the agent detail panel) -->
-{% for p_name, p_name_os in persona_names %}
-<a href="{% url 'replay_persona_state' sim_code step p_name_os %}"
-   id="state-link__{{ p_name_os }}" style="display:none;"></a>
-{% endfor %}
 
 
 <script>
