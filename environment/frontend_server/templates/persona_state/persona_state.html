@@ -4,9 +4,31 @@
 {% block content %}
 
 <style>
-	.scratch_table {
-		font-size: 1.3em;
+	/* Dark-theme this detail page so it's readable on the new dark shell.
+	   (The card used to be a light #EEEEEE box, which left the now-light body
+	   text invisible.) */
+	.media[style] { background-color: var(--surface) !important; }
+	.media {
+		border: 1px solid var(--border);
+		color: var(--text);
+		box-shadow: 0 8px 32px rgba(0,0,0,0.4);
 	}
+	.media-body, .media-body td, .media-body p,
+	.media-body h1, .media-body h2, .media-body h3, .media-body strong {
+		color: var(--text);
+	}
+	.scratch_table {
+		font-size: 1.2em;
+		color: var(--text2);
+	}
+	.scratch_table td {
+		padding: 5px 10px;
+		vertical-align: top;
+	}
+	/* The bold label column reads brighter than the values. */
+	.scratch_table td[style*="font-weight"] { color: var(--text); }
+	hr { border-color: var(--border) !important; }
+	a { color: var(--blue); }
 </style>
 
 
