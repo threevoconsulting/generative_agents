@@ -48,6 +48,39 @@ def _resolve_address_tiles(plan, maze, persona):
   return {tuple(persona.scratch.curr_tile)}
 
 
+def _bed_tiles_for_sleep(plan, maze):
+  """
+  For a sleeping action, return the tiles of the bed in the action's room,
+  using the map's known bed objects. The "sleeping" action address often points
+  at the bedroom arena (e.g. "...:Isabella Rodriguez's apartment:main room")
+  rather than the bed object, which left sleepers scattered around the room.
+  The map is static and every bedroom's bed is an addressable game object
+  ("<world>:<sector>:<arena>:bed"), so we look it up directly.
+
+  Returns the bed's tile set, or None when the action's room has no bed (e.g.
+  napping somewhere without one) so the caller falls back to normal targeting.
+  """
+  parts = plan.split(":")
+  # Try the arena-level address first ("world:sector:arena"), then the
+  # sector-level one ("world:sector"), appending each known bed keyword.
+  for depth in (3, 2):
+    if len(parts) >= depth:
+      prefix = ":".join(parts[:depth])
+      for kw in BED_KEYWORDS:
+        key = f"{prefix}:{kw}"
+        if key in maze.address_tiles:
+          return maze.address_tiles[key]
+      # Fallback: any addressed object under this prefix whose last segment
+      # looks like a bed (covers "double bed", "bunk", etc.).
+      for addr, tiles in maze.address_tiles.items():
+        seg = addr.split(":")
+        if (len(seg) > depth
+            and ":".join(seg[:depth]) == prefix
+            and any(kw in seg[-1].lower() for kw in BED_KEYWORDS)):
+          return tiles
+  return None
+
+
 def execute(persona, maze, personas, plan):
   """
   Given a plan (action's string address), we execute the plan (actually 
@@ -127,10 +160,19 @@ def execute(persona, maze, personas, plan):
       # a valid one instead of crashing.
       target_tiles = _resolve_address_tiles(plan, maze, persona)
 
+    # If the agent is going to sleep, steer them onto the actual bed in their
+    # room using the map's known bed objects. The sleep action address often
+    # resolves only to the bedroom arena, so without this the sampling below
+    # would scatter sleepers across the room instead of putting them in bed.
+    if "sleep" in (persona.scratch.act_description or "").lower():
+      bed_tiles = _bed_tiles_for_sleep(plan, maze)
+      if bed_tiles:
+        target_tiles = bed_tiles
+
     # There are sometimes more than one tile returned from this (e.g., a tabe
-    # may stretch many coordinates). So, we sample a few here. And from that 
-    # random sample, we will take the closest ones. 
-    if len(target_tiles) < 4: 
+    # may stretch many coordinates). So, we sample a few here. And from that
+    # random sample, we will take the closest ones.
+    if len(target_tiles) < 4:
       target_tiles = random.sample(list(target_tiles), len(target_tiles))
     else:
       target_tiles = random.sample(list(target_tiles), 4)
