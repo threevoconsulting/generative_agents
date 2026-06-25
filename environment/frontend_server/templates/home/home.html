@@ -2,133 +2,255 @@
 {% load staticfiles %}
 
 {% block content %}
-<br>
-<br>
-<div>
-	<div id="game-container" style="text-align: center"></div>
 
-	<!-- FOCUS MODE: click an agent to follow them ("through their eyes"),
-	     switchable live; "Free cam" returns to the roaming camera. -->
-	<div id="focus-bar" style="width:80%; margin:1em auto 0; text-align:center">
-		<strong style="margin-right:0.5em">Focus:</strong>
-		{% for p_name, p_name_os in persona_names %}
-			<button type="button" class="btn btn-default btn-sm focus-btn" data-name="{{ p_name }}"
-			        onclick="window.focusPersona('{{ p_name }}')" style="margin:0.15em">
+<!-- ====================================================================== -->
+<!-- NAV BAR                                                                -->
+<!-- ====================================================================== -->
+<nav id="sim-nav">
+	<!-- Left: logo + sim name -->
+	<div style="display:flex;align-items:center;gap:10px;min-width:200px;">
+		<div style="width:28px;height:28px;border-radius:6px;background:var(--surface3);
+		            display:flex;align-items:center;justify-content:center;font-size:14px;">🏘</div>
+		<div>
+			<div style="font-size:13px;font-weight:600;color:var(--text);line-height:1;">Smallville</div>
+			<div style="font-family:var(--font-mono);font-size:9px;color:var(--faint);">{{ sim_code }}</div>
+		</div>
+	</div>
+
+	<!-- Center: mode tabs -->
+	<div style="flex:1;display:flex;justify-content:center;gap:4px;">
+		<a href="{% url 'home' %}" class="mode-tab {% if mode == 'simulate' %}active{% endif %}">Simulate</a>
+		<a href="{% url 'replay' sim_code step %}" class="mode-tab {% if mode == 'replay' %}active{% endif %}">Replay</a>
+		<a href="{% url 'demo' sim_code step '3' %}" class="mode-tab">Demo</a>
+		<a href="{% url 'play' %}" class="mode-tab {% if mode == 'play' %}active{% endif %}">Play Mode</a>
+	</div>
+
+	<!-- Right: step counter + live-transport status -->
+	<div style="display:flex;align-items:center;gap:12px;min-width:200px;justify-content:flex-end;">
+		<div style="font-family:var(--font-mono);font-size:11px;color:var(--muted);">
+			Step <span id="nav-step-counter" style="color:var(--text);">{{ step }}</span>
+		</div>
+		<div style="display:flex;align-items:center;gap:5px;">
+			<div id="ws-status-dot" style="width:8px;height:8px;border-radius:50%;background:var(--faint);"></div>
+			<div id="ws-status-label" style="font-size:11px;color:var(--faint);">Connecting</div>
+		</div>
+	</div>
+</nav>
+
+<!-- ====================================================================== -->
+<!-- MAIN TWO-COLUMN LAYOUT                                                  -->
+<!-- ====================================================================== -->
+<div id="sim-layout">
+
+	<!-- CANVAS COLUMN -->
+	<div id="sim-canvas-wrap">
+		<div id="game-container"></div>
+
+		<!-- Thinking overlay (shown during the LLM "update" phase) -->
+		<div id="thinking-overlay" style="display:none;position:absolute;inset:0;
+		     pointer-events:none;border-radius:5px;
+		     box-shadow:inset 0 0 0 3px rgba(212,137,74,0.7);">
+			<div style="position:absolute;top:12px;left:12px;background:rgba(14,12,10,0.88);
+			     border:1px solid rgba(212,137,74,0.75);border-radius:7px;padding:7px 12px;
+			     display:flex;align-items:center;gap:8px;backdrop-filter:blur(4px);">
+				<div id="thinking-dot" style="width:6px;height:6px;border-radius:50%;background:#d4894a;"></div>
+				<span id="thinking-label" style="font-family:var(--font-mono);font-size:11px;color:#d4894a;"></span>
+			</div>
+		</div>
+
+		<!-- Canvas overlay controls (bottom-left zoom) -->
+		<div style="position:absolute;bottom:14px;left:14px;display:flex;gap:6px;z-index:50;">
+			<button class="canvas-ctrl" onclick="if(window.game_camera)window.game_camera.setZoom(Math.max(0.2,game_camera.zoom*0.8))">−</button>
+			<button class="canvas-ctrl" id="zoom-label">1.0×</button>
+			<button class="canvas-ctrl" onclick="if(window.game_camera)window.game_camera.setZoom(Math.min(3,game_camera.zoom*1.25))">+</button>
+		</div>
+
+		<!-- Play / pause overlay (only meaningful in replay/demo; always present so
+		     the Phaser update loop can safely bind to the buttons). -->
+		<div style="position:absolute;bottom:14px;right:14px;display:flex;gap:6px;z-index:50;
+		            {% if mode == 'simulate' or mode == 'play' %}display:none;{% endif %}">
+			<button id="play_button" class="canvas-ctrl">▶ Play</button>
+			<button id="pause_button" class="canvas-ctrl">⏸ Pause</button>
+		</div>
+
+		<!-- Sprite tooltip (follows the cursor over a hovered agent) -->
+		<div id="sprite-tooltip"
+		     style="display:none;position:fixed;background:rgba(14,12,10,.88);
+		            border:1px solid var(--border);border-radius:5px;padding:4px 10px;
+		            font-size:11px;color:var(--text);pointer-events:none;z-index:3000;
+		            font-family:var(--font-mono);"></div>
+	</div>
+
+	<!-- SIDEBAR COLUMN -->
+	<div id="sim-sidebar">
+
+		<!-- In-game time header -->
+		<div style="padding:14px 16px 12px;border-bottom:1px solid var(--border);">
+			<div style="font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--faint);margin-bottom:4px;">In-Game Time</div>
+			<div style="font-size:20px;font-weight:600;letter-spacing:-.01em;" id="game-time-content">—</div>
+			<div style="display:flex;align-items:center;gap:6px;margin-top:6px;">
+				<div id="step-progress-bar" style="height:3px;flex:1;background:var(--surface3);border-radius:2px;overflow:hidden;">
+					<div id="step-progress-fill" style="height:100%;width:0%;background:var(--amber);border-radius:2px;transition:width .5s;"></div>
+				</div>
+				<div style="font-family:var(--font-mono);font-size:10px;color:var(--faint);">
+					<span id="sidebar-step">{{ step }}</span> steps
+				</div>
+			</div>
+		</div>
+
+		<!-- Agent list -->
+		<div style="flex:1;overflow-y:auto;" id="agent-list">
+			{% for p_name, p_name_os in persona_names %}
+			<div class="agent-card" id="agent-card__{{ p_name_os }}"
+			     onclick="window.focusPersona('{{ p_name }}')">
+				<div style="display:flex;gap:10px;align-items:flex-start;">
+					<img src="{% static 'assets/characters/profile/' %}{{ p_name_os }}.png"
+					     style="width:34px;height:34px;border-radius:50%;object-fit:cover;
+					            border:2px solid var(--border);flex-shrink:0;background:var(--surface3);">
+					<div style="flex:1;min-width:0;">
+						<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:3px;">
+							<div style="font-size:13px;font-weight:500;color:var(--text);
+							            white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ p_name }}</div>
+							<div class="agent-status-dot" id="status-dot__{{ p_name_os }}"
+							     style="width:7px;height:7px;border-radius:50%;background:var(--green);
+							            flex-shrink:0;margin-left:6px;"></div>
+						</div>
+						<div id="current_action__{{ p_name_os }}"
+						     style="font-size:11px;color:var(--muted);white-space:nowrap;
+						            overflow:hidden;text-overflow:ellipsis;"></div>
+						<div id="target_address__{{ p_name_os }}"
+						     style="font-family:var(--font-mono);font-size:10px;color:var(--faint);margin-top:2px;
+						            white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></div>
+						<!-- Latest conversation line (kept hidden; surfaced in the feed below). -->
+						<span id="chat__{{ p_name_os }}" style="display:none;"></span>
+					</div>
+				</div>
+			</div>
+			{% endfor %}
+		</div>
+
+		<!-- Focus / Free-cam strip -->
+		<div style="padding:10px 14px;border-top:1px solid var(--border);border-bottom:1px solid var(--border);
+		            display:flex;gap:6px;flex-wrap:wrap;">
+			{% for p_name, p_name_os in persona_names %}
+			<button class="btn btn-default btn-sm focus-btn" data-name="{{ p_name }}"
+			        onclick="window.focusPersona('{{ p_name }}')"
+			        style="display:flex;align-items:center;gap:4px;padding:3px 8px;">
 				<img src="{% static 'assets/characters/profile/' %}{{ p_name_os }}.png"
-				     style="width:1.6em; height:1.6em; border-radius:50%; object-fit:cover; vertical-align:-0.4em; margin-right:0.35em">{{ p_name }}</button>
-		{% endfor %}
-		<button type="button" class="btn btn-default btn-sm" onclick="window.unfocus()" style="margin:0.15em">Free cam</button>
-	</div>
-	<script>
-		// Highlight the currently-followed agent's button.
-		window.onFocusChange = function (name) {
-			document.querySelectorAll('.focus-btn').forEach(function (b) {
-				var on = b.getAttribute('data-name') === name;
-				b.classList.toggle('active', on);
-				b.style.fontWeight = on ? 'bold' : 'normal';
-			});
-		};
-	</script>
-
-	<!-- CONVERSATION FEED: a scrollback log of every dialogue line as it is
-	     revealed on the map, so a whole conversation can be read without
-	     chasing bubbles around town. Fed by main_script.html. -->
-	<div id="convo-feed-wrap" style="width:80%; margin:1.5em auto 0">
-		<h4 style="margin-bottom:0.4em"><strong>Conversation Feed</strong></h4>
-		<div id="convo-feed" style="height:220px; overflow-y:auto; background:#ffffff;
-		     border:1px solid #cccccc; border-radius:8px; padding:0.8em 1em;
-		     text-align:left; font-size:0.95em">
-			<em id="convo-feed-empty" style="color:#999999">No conversations yet.</em>
+				     style="width:16px;height:16px;border-radius:50%;object-fit:cover;">
+				<span style="font-size:11px;">{{ p_name|slice:":1" }}</span>
+			</button>
+			{% endfor %}
+			<button class="btn btn-default btn-sm" onclick="window.unfocus()"
+			        style="font-size:11px;padding:3px 8px;">Free cam</button>
 		</div>
-	</div>
-	<script>
-		// Appends one revealed dialogue line; auto-scrolls only when the reader
-		// is already at the bottom so scrollback isn't yanked away.
-		window.convoFeedAppend = function (speaker, text, time) {
-			var feed = document.getElementById('convo-feed');
-			if (!feed) return;
-			var empty = document.getElementById('convo-feed-empty');
-			if (empty) empty.parentNode.removeChild(empty);
-			var atBottom = feed.scrollTop + feed.clientHeight >= feed.scrollHeight - 30;
-			var row = document.createElement('div');
-			row.style.marginBottom = '0.35em';
-			var t = document.createElement('span');
-			t.style.cssText = 'color:#999999; font-size:0.85em; margin-right:0.4em';
-			t.textContent = time ? '[' + time + ']' : '';
-			var s = document.createElement('strong');
-			s.textContent = speaker + ': ';
-			var b = document.createElement('span');
-			b.textContent = text;
-			row.appendChild(t); row.appendChild(s); row.appendChild(b);
-			feed.appendChild(row);
-			if (atBottom) feed.scrollTop = feed.scrollHeight;
-		};
-	</script>
 
-	<div style="width:55%; margin: 0 auto; margin-top:4.5em">
-		<h3 style="margin-bottom:-0.5em; font-size:1.5em">Current Time:</h3>
-		<div class="row">
-			<div class="col-md-8" id="game-time" style="">
-				<h2><span id="game-time-content"></span></h2> 
-			</div>
-			<div class="col-md-4">
-				
-				<h2 style="text-align: right; {% if mode == 'simulate' %} display: none {% endif %}">
-					<button id="play_button" type="button" class="btn btn-default">
-				    <strong style=" font-size:1.2em"><i class="glyphicon glyphicon-play"></i> &nbsp;Play</strong>
-				  </button>
-				  
-				  <button id="pause_button" type="button" class="btn btn-default">
-				    <strong style=" font-size:1.2em"><i class="glyphicon glyphicon-pause"></i> &nbsp;Pause</strong>
-				  </button>
-
-				</h2>
-				
+		<!-- Conversation feed -->
+		<div style="padding:12px 16px;background:var(--bg);flex-shrink:0;">
+			<div style="font-size:10px;text-transform:uppercase;letter-spacing:.1em;
+			            color:var(--faint);margin-bottom:8px;">Conversation Feed</div>
+			<div id="convo-feed"
+			     style="height:160px;overflow-y:auto;font-size:11px;line-height:1.6;color:var(--text2);">
+				<em id="convo-feed-empty" style="color:var(--faint);">No conversations yet.</em>
 			</div>
 		</div>
 
-		<br>
-		<hr style="border-color:#999999">
-		<br>
-
-		{% for p_name, p_name_os in persona_names %}
-			<div class="media" style="background-color:#EEEEEE; padding:0.8em 1.2em; border-radius:10px; margin-bottom:0.8em">
-			  <div class="media-left media-middle">
-			    <a href="#">
-			      <img class="media-object" src="{% static 'assets/characters/profile/' %}{{ p_name_os }}.png" style="width:3.5em; border-radius:8px">
-			    </a>
-			  </div>
-			  <div class="media-body" style="padding-left:1em">
-			    <h4 id="name__{{ p_name_os }}" style="margin:0 0 0.4em 0">
-			    	<strong>{{p_name}}</strong> &nbsp;
-			    	<a href="{% url 'replay_persona_state' sim_code step p_name_os %}" style="font-size:0.75em">State Details</a>
-			    </h4>
-			    <p style="margin:0 0 0.2em 0"><strong>Action:</strong> <span id="current_action__{{ p_name_os }}"></span></p>
-			    <p style="margin:0 0 0.2em 0"><strong>Location:</strong> <span id="target_address__{{ p_name_os }}"></span></p>
-			    <p style="margin:0"><strong>Conversation:</strong> <span id="chat__{{ p_name_os }}"></span></p>
-			  </div>
-			</div>
-		{% endfor %}
+	</div><!-- end #sim-sidebar -->
+</div><!-- end #sim-layout -->
 
 
+<!-- State Details links (hidden — opened from the agent detail panel) -->
+{% for p_name, p_name_os in persona_names %}
+<a href="{% url 'replay_persona_state' sim_code step p_name_os %}"
+   id="state-link__{{ p_name_os }}" style="display:none;"></a>
+{% endfor %}
 
 
-		
+<script>
+	// Highlight the currently-followed agent's focus button AND sidebar card.
+	window.onFocusChange = function (name) {
+		document.querySelectorAll('.focus-btn').forEach(function (b) {
+			b.classList.toggle('active', b.getAttribute('data-name') === name);
+		});
+		document.querySelectorAll('.agent-card').forEach(function (c) {
+			c.classList.remove('active');
+		});
+		if (name) {
+			var card = document.getElementById('agent-card__' + name.replace(/ /g, '_'));
+			if (card) {
+				card.classList.add('active');
+				card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+			}
+		}
+	};
 
-	</div>
-</div>
+	// Clicking a sprite on the map (wired in main_script.html) routes here.
+	window.showAgentPanel = function (name) {
+		if (typeof window.focusPersona === 'function') {
+			window.focusPersona(name);
+		} else if (window.onFocusChange) {
+			window.onFocusChange(name);
+		}
+	};
 
-  
+	// Appends one revealed dialogue line to the conversation feed; auto-scrolls
+	// only when the reader is already at the bottom so scrollback isn't yanked.
+	window.convoFeedAppend = function (speaker, text, time) {
+		var feed = document.getElementById('convo-feed');
+		if (!feed) return;
+		var empty = document.getElementById('convo-feed-empty');
+		if (empty) empty.parentNode.removeChild(empty);
+		var atBottom = feed.scrollTop + feed.clientHeight >= feed.scrollHeight - 30;
+		var row = document.createElement('div');
+		row.style.marginBottom = '6px';
+		var t = document.createElement('span');
+		t.style.cssText = 'color:var(--faint);font-size:0.85em;margin-right:0.4em;';
+		t.textContent = time ? '[' + time + ']' : '';
+		var s = document.createElement('strong');
+		s.style.color = 'var(--amber)';
+		s.textContent = speaker + ': ';
+		var b = document.createElement('span');
+		b.textContent = text;
+		row.appendChild(t); row.appendChild(s); row.appendChild(b);
+		feed.appendChild(row);
+		if (atBottom) feed.scrollTop = feed.scrollHeight;
+	};
+
+	// Keep the nav step counter, sidebar step, and a rolling progress bar in
+	// sync with the Phaser <step> as the sim advances.
+	(function () {
+		var lastStep = null;
+		setInterval(function () {
+			if (typeof step === 'undefined') return;
+			if (step === lastStep) return;
+			lastStep = step;
+			var navc = document.getElementById('nav-step-counter');
+			var sbc  = document.getElementById('sidebar-step');
+			if (navc) navc.textContent = step;
+			if (sbc)  sbc.textContent = step;
+			var fill = document.getElementById('step-progress-fill');
+			// A soft, looping fill that resets each "day" (1440 sim steps) just
+			// to give a sense of progress; purely cosmetic.
+			if (fill) fill.style.width = ((step % 1440) / 1440 * 100).toFixed(1) + '%';
+		}, 400);
+	})();
+
+	// Reflect the live zoom level on the zoom-label button.
+	(function () {
+		setInterval(function () {
+			var lbl = document.getElementById('zoom-label');
+			if (lbl && window.game_camera) {
+				lbl.textContent = window.game_camera.zoom.toFixed(1) + '×';
+			}
+		}, 300);
+	})();
+</script>
 
 
-
-<div style="padding-bottom:15em"> </div>
-
-
-<!-- partial -->
+<!-- Phaser + the main simulation script -->
 <script src='https://cdn.jsdelivr.net/npm/phaser@3.55.2/dist/phaser.js'></script>
 {% include 'home/main_script.html' %}
 {% include 'home/touch_controls.html' %}
 {% if mode == 'play' %}{% include 'home/play_controls.html' %}{% endif %}
-{% endblock content %}
 
+{% endblock content %}

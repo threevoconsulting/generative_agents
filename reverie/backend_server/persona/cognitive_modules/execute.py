@@ -13,6 +13,13 @@ from path_finder import *
 from utils import *
 
 
+# Keywords the LLM uses to name sleeping surfaces. The model sometimes says
+# "double bed", "bunk bed", "cot", "mattress", etc. -- none of which contain
+# the bare word "bed" after splitting on ":" (e.g. "...:bunk"). Matching this
+# wider set keeps sleep-centering working for all of them.
+BED_KEYWORDS = {"bed", "bunk", "cot", "mattress", "pillow"}
+
+
 def _resolve_address_tiles(plan, maze, persona):
   """
   Return the set of tiles for the action address <plan>. If the model named a
@@ -20,6 +27,11 @@ def _resolve_address_tiles(plan, maze, persona):
   none), degrade to a less-specific address that does exist (drop arena ->
   sector -> world). As a last resort keep the persona where they are, so a
   hallucinated location can never crash the simulation.
+
+  When degrading, prefer tiles that carry a spawning_location marker. These are
+  intentionally placed walkable positions set by the map author, so an agent
+  that falls back to the sector level lands on a sensible spot rather than on a
+  random tile (which could be a bathroom, doorway, or wall edge).
   """
   if plan in maze.address_tiles:
     return maze.address_tiles[plan]
@@ -28,7 +40,11 @@ def _resolve_address_tiles(plan, maze, persona):
     parts = parts[:-1]
     key = ":".join(parts)
     if key in maze.address_tiles:
-      return maze.address_tiles[key]
+      tiles = maze.address_tiles[key]
+      # Prefer spawn-location tiles within this address when any exist.
+      spawn_tiles = {t for t in tiles
+                     if maze.access_tile(t).get("spawning_location")}
+      return spawn_tiles if spawn_tiles else tiles
   return {tuple(persona.scratch.curr_tile)}
 
 
@@ -144,17 +160,19 @@ def execute(persona, maze, personas, plan):
     # fight). If the center is taken by someone else (a shared double bed),
     # the sampled tile is kept so partners settle on different tiles.
     act_desc = (persona.scratch.act_description or "").lower()
-    if "sleep" in act_desc and "bed" in plan.split(":")[-1]:
+    last_obj = plan.split(":")[-1].lower()
+    if "sleep" in act_desc and any(kw in last_obj for kw in BED_KEYWORDS):
       centered_tiles = []
       for t in target_tiles:
         pose = maze.get_game_object_pose(t)
-        if pose and "bed" in pose["object"]:
+        if pose and any(kw in pose["object"].lower() for kw in BED_KEYWORDS):
           c = (int(round(pose["anchor_tile"][0])),
                int(round(pose["anchor_tile"][1])))
           c_tile = maze.access_tile(c)
           occupied = any(j[0] in persona_name_set and j[0] != persona.name
                          for j in c_tile["events"])
-          if "bed" in (c_tile["game_object"] or "") and not occupied:
+          if (any(kw in (c_tile["game_object"] or "").lower()
+                  for kw in BED_KEYWORDS) and not occupied):
             centered_tiles += [c]
             continue
         centered_tiles += [tuple(t)]
@@ -186,7 +204,14 @@ def execute(persona, maze, personas, plan):
     # first element in the planned_path because it includes the curr_tile. 
     persona.scratch.planned_path = path[1:]
     persona.scratch.act_path_set = True
-  
+
+    # If BFS found no route (path_finder returned just [curr_tile], so
+    # path[1:] is empty), reset act_path_set so the cognitive loop picks a
+    # new action on the next step instead of freezing the agent permanently
+    # in place with an empty planned_path.
+    if not persona.scratch.planned_path:
+      persona.scratch.act_path_set = False
+
   # Setting up the next immediate step. We stay at our curr_tile if there is
   # no <planned_path> left, but otherwise, we go to the next tile in the path.
   ret = persona.scratch.curr_tile

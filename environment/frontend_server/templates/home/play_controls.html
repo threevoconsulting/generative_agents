@@ -2,35 +2,63 @@
 
 <!-- ==========================================================================
      PLAY MODE CONTROLS
-     A simple chat panel that lets the human player talk to whichever agent
-     they are standing near. Player<->agent chat is routed to the backend
-     through Django (player_chat / player_chat_response) and serviced by the
-     reverie run loop, so a simulation must be actively running ("run <N>")
-     for agents to reply.
+     A chat panel that lets the human player talk to whichever agent they are
+     standing near. Player<->agent chat is routed to the backend through Django
+     (player_chat / player_chat_response) and serviced by the reverie run loop,
+     so a simulation must be actively running ("run <N>") for agents to reply.
      This script runs after main_script.html and relies on the globals it
      declares (player, personas, sim_code, player_name, tile_width).
 =========================================================================== -->
 
-<div id="player-chat-panel" style="position:fixed; right:1em; bottom:1em;
-     width:23em; background:#ffffff; border:2px solid #333; border-radius:10px;
-     padding:0.8em; font-family:monospace; z-index:1000; box-shadow:0 4px 14px rgba(0,0,0,0.25);">
-  <div style="font-weight:bold; margin-bottom:0.4em;">
-    🗣️ Talking to: <span id="chat-target" style="color:#1a6">(walk up to someone)</span>
-  </div>
-  <div id="chat-transcript" style="height:11em; overflow-y:auto;
-       background:#f4f4f4; padding:0.5em; border-radius:6px; font-size:0.85em;
-       line-height:1.35em;"></div>
-  <div style="margin-top:0.5em; display:flex; gap:0.3em;">
-    <input id="chat-input" type="text" placeholder="Say something..."
-           style="flex:1; padding:0.3em;">
-    <button id="chat-send" class="btn btn-default btn-sm">Send</button>
-    <button id="chat-end" class="btn btn-default btn-sm" title="End the conversation">End</button>
-  </div>
-  <div id="chat-status" style="font-size:0.75em; color:#888; margin-top:0.3em; min-height:1em;"></div>
-  <div style="font-size:0.72em; color:#aaa; margin-top:0.3em;">
-    Move with arrow keys. Walk near a resident, then chat. (Requires a running
-    simulation.)
-  </div>
+<div id="player-chat-panel">
+
+	<!-- Header -->
+	<div style="padding:12px 16px;border-bottom:1px solid var(--border);
+	            display:flex;align-items:center;gap:10px;justify-content:space-between;
+	            background:var(--surface);">
+		<div style="display:flex;align-items:center;gap:8px;">
+			<div style="width:28px;height:28px;border-radius:50%;background:var(--surface3);
+			            border:1.5px solid var(--border);display:flex;align-items:center;
+			            justify-content:center;font-size:10px;font-weight:700;color:var(--muted);"
+			     id="chat-target-avatar">?</div>
+			<div>
+				<div style="font-size:13px;font-weight:500;color:var(--text);"
+				     id="chat-target">(walk up to someone)</div>
+				<div style="font-size:11px;color:var(--faint);" id="chat-proximity-label"></div>
+			</div>
+		</div>
+		<button id="chat-end"
+		        style="padding:4px 10px;background:#3b1818;border:1px solid #5a2020;
+		               border-radius:5px;font-size:11px;color:#d45b5b;cursor:pointer;">
+			End
+		</button>
+	</div>
+
+	<!-- Transcript -->
+	<div id="chat-transcript"
+	     style="height:200px;overflow-y:auto;padding:12px 14px;
+	            background:var(--bg);display:flex;flex-direction:column;gap:10px;">
+	</div>
+
+	<!-- Status bar -->
+	<div id="chat-status"
+	     style="padding:4px 16px;font-size:11px;color:var(--amber);min-height:22px;
+	            background:var(--surface);border-top:1px solid var(--border);"></div>
+
+	<!-- Input bar -->
+	<div style="padding:10px 12px;border-top:1px solid var(--border);
+	            display:flex;gap:8px;align-items:center;background:var(--surface);">
+		<input id="chat-input" type="text" placeholder="Say something…"
+		       style="flex:1;background:var(--bg);border:1px solid var(--border);
+		              border-radius:var(--radius-md);padding:9px 12px;font-size:13px;
+		              color:var(--text);font-family:var(--font-ui);outline:none;">
+		<button id="chat-send"
+		        style="padding:9px 16px;background:var(--amber);border-radius:var(--radius-md);
+		               font-size:13px;font-weight:600;color:#0e0c0a;cursor:pointer;
+		               border:none;white-space:nowrap;">
+			Send
+		</button>
+	</div>
 </div>
 
 <script type="text/javascript">
@@ -44,9 +72,16 @@
   let awaiting = false;       // waiting on a backend reply
 
   const $target = document.getElementById("chat-target");
+  const $avatar = document.getElementById("chat-target-avatar");
+  const $prox = document.getElementById("chat-proximity-label");
   const $transcript = document.getElementById("chat-transcript");
   const $input = document.getElementById("chat-input");
   const $status = document.getElementById("chat-status");
+
+  function initials(name) {
+    let parts = (name || "").trim().split(/\s+/);
+    return ((parts[0] || "")[0] || "") + ((parts[parts.length - 1] || "")[0] || "");
+  }
 
   function nearestPersona() {
     let best = null, bestd = Infinity;
@@ -63,21 +98,47 @@
   // Keep the "Talking to" label in sync with the nearest agent (unless a
   // conversation is already locked onto someone).
   setInterval(function () {
-    if (locked_target) { $target.innerText = locked_target + " (in conversation)"; return; }
+    if (locked_target) {
+      $target.innerText = locked_target;
+      $avatar.innerText = initials(locked_target);
+      if ($prox) $prox.innerText = "in conversation";
+      return;
+    }
     let [name, d] = nearestPersona();
     if (name && d <= TALK_RADIUS) {
       chat_target = name;
       $target.innerText = name;
+      $avatar.innerText = initials(name);
+      if ($prox) $prox.innerText = "nearby · ready to chat";
     } else {
       chat_target = null;
       $target.innerText = "(walk up to someone)";
+      $avatar.innerText = "?";
+      if ($prox) $prox.innerText = "";
     }
   }, 400);
 
+  // Render one dialogue line as a styled message bubble (player on the right,
+  // agents on the left), with a small speaker label above each bubble.
   function appendLine(speaker, text) {
-    let div = document.createElement("div");
-    div.innerHTML = "<strong>" + speaker + ":</strong> " + text;
-    $transcript.appendChild(div);
+    var isPlayer = (speaker === player_name);
+    var row = document.createElement('div');
+    row.style.cssText = 'display:flex;gap:8px;align-items:flex-start;'
+                       + (isPlayer ? 'flex-direction:row-reverse;' : '');
+    var wrap = document.createElement('div');
+    wrap.style.cssText = 'display:flex;flex-direction:column;max-width:80%;'
+                        + (isPlayer ? 'align-items:flex-end;' : '');
+    var label = document.createElement('div');
+    label.style.cssText = 'font-size:10px;color:var(--faint);margin-bottom:2px;'
+                         + (isPlayer ? 'text-align:right;' : '');
+    label.textContent = speaker;
+    var bubble = document.createElement('div');
+    bubble.className = isPlayer ? 'chat-msg-player' : 'chat-msg-agent';
+    bubble.textContent = text;
+    wrap.appendChild(label);
+    wrap.appendChild(bubble);
+    row.appendChild(wrap);
+    $transcript.appendChild(row);
     $transcript.scrollTop = $transcript.scrollHeight;
   }
 
@@ -149,7 +210,7 @@
       $status.innerText = "";
     } else {
       awaiting = true;
-      $status.innerText = target + " is thinking...";
+      $status.innerText = target + " is thinking…";
       if (!sentViaWS) pollResponse();  // WS replies are pushed; only poll on XHR
     }
   }

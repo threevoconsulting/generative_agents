@@ -1,4 +1,4 @@
- {
+{
     "frames": [
         {
             "filename": "down-walk.000",
@@ -65,8 +65,6 @@
                 "y": 0.5
             }
         },
-
-
         {
             "filename": "left-walk.000",
             "frame": {
@@ -132,10 +130,6 @@
                 "y": 0.5
             }
         },
-
-
-
-
         {
             "filename": "right-walk.000",
             "frame": {
@@ -201,10 +195,6 @@
                 "y": 0.5
             }
         },
-
-
-
-
         {
             "filename": "up-walk.000",
             "frame": {
@@ -264,6 +254,45 @@
                 "h": 32,
                 "x": 32,
                 "y": 96
+            },
+            "anchor": {
+                "x": 0.5,
+                "y": 0.5
+            }
+        },
+        {
+            "filename": "lie",
+            "frame": {
+                "w": 32,
+                "h": 32,
+                "x": 0,
+                "y": 128
+            },
+            "anchor": {
+                "x": 0.5,
+                "y": 0.5
+            }
+        },
+        {
+            "filename": "sit",
+            "frame": {
+                "w": 32,
+                "h": 32,
+                "x": 32,
+                "y": 128
+            },
+            "anchor": {
+                "x": 0.5,
+                "y": 0.5
+            }
+        },
+        {
+            "filename": "lean",
+            "frame": {
+                "w": 32,
+                "h": 32,
+                "x": 64,
+                "y": 128
             },
             "anchor": {
                 "x": 0.5,
