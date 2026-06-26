@@ -4,6 +4,7 @@ File: views.py
 """
 import os
 import string
+import re
 import random
 import json
 from os import listdir
@@ -17,10 +18,89 @@ from global_methods import *
 from django.contrib.staticfiles.templatetags.staticfiles import static
 from .models import *
 
-def landing(request): 
+def landing(request):
   context = {}
   template = "landing/landing.html"
   return render(request, template, context)
+
+
+# Friendly labels for the bundled base simulations (mirrors reverie.py).
+START_FRIENDLY = {
+  "base_the_ville_isabella_maria_klaus": "3 agents (Isabella, Maria, Klaus)",
+  "base_the_ville_n25": "25 agents (the full town)",
+}
+
+
+def start_options(request):
+  """
+  <START SCREEN> List what the browser start screen can offer:
+    - bases:     base_* sims to fork a fresh run from
+    - saved:     previously recorded runs (to open in view/replay)
+    - scenarios: story premises from reverie/backend_server/scenarios/*.json
+  """
+  bases, saved = [], []
+  if os.path.isdir("storage"):
+    for d in sorted(os.listdir("storage")):
+      if not os.path.isdir(f"storage/{d}") or d.startswith("."):
+        continue
+      (bases if d.startswith("base_") else saved).append(d)
+
+  scenarios = []
+  scen_dir = "../../reverie/backend_server/scenarios"
+  if os.path.isdir(scen_dir):
+    for f in sorted(os.listdir(scen_dir)):
+      if not f.endswith(".json"):
+        continue
+      try:
+        d = json.load(open(f"{scen_dir}/{f}"))
+      except Exception:
+        continue
+      scenarios.append({"file": f,
+                        "name": d.get("name", f),
+                        "description": d.get("description", "")})
+
+  return JsonResponse({
+    "bases": [{"code": b, "label": START_FRIENDLY.get(b, b)} for b in bases],
+    "saved": saved,
+    "scenarios": scenarios,
+  })
+
+
+def start_run(request):
+  """
+  <START SCREEN> Record a run request for the backend. The reverie.py process,
+  when started in browser mode, polls temp_storage/pending_start.json, forks
+  from <origin> into <target> (optionally seeding <scenario>), and is then
+  ready for `run N` in its terminal.
+  """
+  try:
+    data = json.loads(request.body)
+  except Exception:
+    return JsonResponse({"ok": False, "error": "bad request body"}, status=400)
+
+  origin = data.get("origin", "")
+  if not origin or not os.path.isdir(f"storage/{origin}"):
+    return JsonResponse({"ok": False, "error": "unknown origin simulation"},
+                        status=400)
+
+  # Sanitize the run name to a safe folder name (no path traversal / spaces).
+  target = re.sub(r"[^A-Za-z0-9_.-]", "-", (data.get("target") or "").strip())
+  if not target:
+    target = datetime.datetime.now().strftime("run-%b%d-%H%M").lower()
+
+  # The scenario must be one of the known scenario files (basename only).
+  scenario = data.get("scenario") or None
+  if scenario:
+    scenario = os.path.basename(scenario)
+    scen_path = f"../../reverie/backend_server/scenarios/{scenario}"
+    if not os.path.isfile(scen_path):
+      scenario = None
+
+  payload = {"origin": origin, "target": target, "scenario": scenario}
+  os.makedirs("temp_storage", exist_ok=True)
+  with open("temp_storage/pending_start.json", "w") as outfile:
+    outfile.write(json.dumps(payload, indent=2))
+  return JsonResponse({"ok": True, "request": payload})
 
 
 def demo(request, sim_code, step, play_speed="2"): 

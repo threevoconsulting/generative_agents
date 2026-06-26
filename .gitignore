@@ -100,3 +100,5 @@ ENV/
 
 # Rope project settings
 .ropeproject
+# Browser start-screen hand-off (runtime only)
+environment/frontend_server/temp_storage/pending_start.json

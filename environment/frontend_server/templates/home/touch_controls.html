@@ -9,8 +9,9 @@
 =========================================================================== -->
 
 <style>
-  /* Make the game canvas responsive: full width, capped, aspect kept by FIT. */
-  #game-container { width: 100%; height: 75vh; max-width: 1500px; margin: 0 auto; }
+  /* Make the game canvas fill the sidebar-flanked canvas column; the FIT scale
+     mode preserves the 1500x800 aspect ratio and centers it. */
+  #game-container { width: 100%; height: 100%; margin: 0 auto; }
   #game-container canvas { display: block; margin: 0 auto; }
 
   #touch-controls, #touch-zoom {

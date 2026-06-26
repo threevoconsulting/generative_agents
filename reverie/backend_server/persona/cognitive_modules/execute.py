@@ -13,6 +13,13 @@ from path_finder import *
 from utils import *
 
 
+# Keywords the LLM uses to name sleeping surfaces. The model sometimes says
+# "double bed", "bunk bed", "cot", "mattress", etc. -- none of which contain
+# the bare word "bed" after splitting on ":" (e.g. "...:bunk"). Matching this
+# wider set keeps sleep-centering working for all of them.
+BED_KEYWORDS = {"bed", "bunk", "cot", "mattress", "pillow"}
+
+
 def _resolve_address_tiles(plan, maze, persona):
   """
   Return the set of tiles for the action address <plan>. If the model named a
@@ -20,6 +27,11 @@ def _resolve_address_tiles(plan, maze, persona):
   none), degrade to a less-specific address that does exist (drop arena ->
   sector -> world). As a last resort keep the persona where they are, so a
   hallucinated location can never crash the simulation.
+
+  When degrading, prefer tiles that carry a spawning_location marker. These are
+  intentionally placed walkable positions set by the map author, so an agent
+  that falls back to the sector level lands on a sensible spot rather than on a
+  random tile (which could be a bathroom, doorway, or wall edge).
   """
   if plan in maze.address_tiles:
     return maze.address_tiles[plan]
@@ -28,8 +40,45 @@ def _resolve_address_tiles(plan, maze, persona):
     parts = parts[:-1]
     key = ":".join(parts)
     if key in maze.address_tiles:
-      return maze.address_tiles[key]
+      tiles = maze.address_tiles[key]
+      # Prefer spawn-location tiles within this address when any exist.
+      spawn_tiles = {t for t in tiles
+                     if maze.access_tile(t).get("spawning_location")}
+      return spawn_tiles if spawn_tiles else tiles
   return {tuple(persona.scratch.curr_tile)}
+
+
+def _bed_tiles_for_sleep(plan, maze):
+  """
+  For a sleeping action, return the tiles of the bed in the action's room,
+  using the map's known bed objects. The "sleeping" action address often points
+  at the bedroom arena (e.g. "...:Isabella Rodriguez's apartment:main room")
+  rather than the bed object, which left sleepers scattered around the room.
+  The map is static and every bedroom's bed is an addressable game object
+  ("<world>:<sector>:<arena>:bed"), so we look it up directly.
+
+  Returns the bed's tile set, or None when the action's room has no bed (e.g.
+  napping somewhere without one) so the caller falls back to normal targeting.
+  """
+  parts = plan.split(":")
+  # Try the arena-level address first ("world:sector:arena"), then the
+  # sector-level one ("world:sector"), appending each known bed keyword.
+  for depth in (3, 2):
+    if len(parts) >= depth:
+      prefix = ":".join(parts[:depth])
+      for kw in BED_KEYWORDS:
+        key = f"{prefix}:{kw}"
+        if key in maze.address_tiles:
+          return maze.address_tiles[key]
+      # Fallback: any addressed object under this prefix whose last segment
+      # looks like a bed (covers "double bed", "bunk", etc.).
+      for addr, tiles in maze.address_tiles.items():
+        seg = addr.split(":")
+        if (len(seg) > depth
+            and ":".join(seg[:depth]) == prefix
+            and any(kw in seg[-1].lower() for kw in BED_KEYWORDS)):
+          return tiles
+  return None
 
 
 def execute(persona, maze, personas, plan):
@@ -111,10 +160,19 @@ def execute(persona, maze, personas, plan):
       # a valid one instead of crashing.
       target_tiles = _resolve_address_tiles(plan, maze, persona)
 
+    # If the agent is going to sleep, steer them onto the actual bed in their
+    # room using the map's known bed objects. The sleep action address often
+    # resolves only to the bedroom arena, so without this the sampling below
+    # would scatter sleepers across the room instead of putting them in bed.
+    if "sleep" in (persona.scratch.act_description or "").lower():
+      bed_tiles = _bed_tiles_for_sleep(plan, maze)
+      if bed_tiles:
+        target_tiles = bed_tiles
+
     # There are sometimes more than one tile returned from this (e.g., a tabe
-    # may stretch many coordinates). So, we sample a few here. And from that 
-    # random sample, we will take the closest ones. 
-    if len(target_tiles) < 4: 
+    # may stretch many coordinates). So, we sample a few here. And from that
+    # random sample, we will take the closest ones.
+    if len(target_tiles) < 4:
       target_tiles = random.sample(list(target_tiles), len(target_tiles))
     else:
       target_tiles = random.sample(list(target_tiles), 4)
@@ -144,17 +202,19 @@ def execute(persona, maze, personas, plan):
     # fight). If the center is taken by someone else (a shared double bed),
     # the sampled tile is kept so partners settle on different tiles.
     act_desc = (persona.scratch.act_description or "").lower()
-    if "sleep" in act_desc and "bed" in plan.split(":")[-1]:
+    last_obj = plan.split(":")[-1].lower()
+    if "sleep" in act_desc and any(kw in last_obj for kw in BED_KEYWORDS):
       centered_tiles = []
       for t in target_tiles:
         pose = maze.get_game_object_pose(t)
-        if pose and "bed" in pose["object"]:
+        if pose and any(kw in pose["object"].lower() for kw in BED_KEYWORDS):
           c = (int(round(pose["anchor_tile"][0])),
                int(round(pose["anchor_tile"][1])))
           c_tile = maze.access_tile(c)
           occupied = any(j[0] in persona_name_set and j[0] != persona.name
                          for j in c_tile["events"])
-          if "bed" in (c_tile["game_object"] or "") and not occupied:
+          if (any(kw in (c_tile["game_object"] or "").lower()
+                  for kw in BED_KEYWORDS) and not occupied):
             centered_tiles += [c]
             continue
         centered_tiles += [tuple(t)]
@@ -186,7 +246,23 @@ def execute(persona, maze, personas, plan):
     # first element in the planned_path because it includes the curr_tile. 
     persona.scratch.planned_path = path[1:]
     persona.scratch.act_path_set = True
-  
+
+    # An empty planned_path (path == [curr_tile]) arises in two situations:
+    #   (a) the chosen target IS the current tile -- the agent is already
+    #       settled on it (e.g. acting on a multi-tile object or arena it is
+    #       standing on). It must stay put; resetting here would re-sample
+    #       target tiles next tick and the occupied-tile filter could send the
+    #       agent wandering off the object for the same action.
+    #   (b) the target is genuinely unreachable. Only here do we reset
+    #       act_path_set, so the cognitive loop picks a new action next step
+    #       instead of freezing the agent permanently in place.
+    # Distinguish them by whether the picked target equals the current tile.
+    if not persona.scratch.planned_path:
+      already_settled = (closest_target_tile is not None and
+                         tuple(closest_target_tile) == tuple(curr_tile))
+      if not already_settled:
+        persona.scratch.act_path_set = False
+
   # Setting up the next immediate step. We stay at our curr_tile if there is
   # no <planned_path> left, but otherwise, we go to the next tile in the path.
   ret = persona.scratch.curr_tile
