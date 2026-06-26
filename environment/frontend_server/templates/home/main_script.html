@@ -253,6 +253,17 @@
 	                         "bathtub", "piano", "easel", "computer", "shelf",
 	                         "bookshelf", "cabinet", "dresser", "blackboard"];
 
+	// *** BED HEADBOARD DIRECTIONS ***
+	// The Ville's beds are NOT all headboard-up: most are vertical (head up) but
+	// a handful are drawn horizontally (head to the left). The in-bed sleep
+	// sprite is drawn head-up, so it must be rotated to match each bed. This map
+	// (bed tile "x,y" -> head direction) is derived from the static map's bed
+	// sprites + walls; the map never changes, so it is baked in here. Tiles not
+	// listed default to "up".  (Latoya Williams's 16,18 corner bed is ambiguous
+	// and left as "up".)
+	let BED_HEAD = {"53,14":"up","54,14":"up","72,14":"up","73,14":"up","16,18":"up","25,18":"up","26,18":"up","36,18":"left","86,18":"up","87,18":"up","93,18":"up","94,18":"up","65,19":"up","66,19":"up","16,32":"left","26,32":"left","126,46":"up","127,46":"up","123,57":"left","118,61":"up","119,61":"up","107,62":"left","20,65":"up","21,65":"up","28,65":"up","29,65":"up","36,65":"up","37,65":"up","54,74":"up","55,74":"up","57,74":"up","58,74":"up","72,74":"up","73,74":"up","75,74":"up","76,74":"up","90,74":"up","91,74":"up","93,74":"up","94,74":"up"};
+	let BED_HEAD_ANGLE = {up: 0, right: 90, down: 180, left: 270};
+
 	// <timer_max> determines how frequently our update function will query the 
 	// frontend server. If it's higher, we wait longer cycles. 
 	let timer_max = 0;
@@ -1153,13 +1164,16 @@
 			      curr_persona.setAngle(0);
 			      if (GROUND_SLEEP && idle_desc.indexOf("sleep") >= 0) {
 			        if (idle_obj.indexOf("bed") >= 0 && char_tex.has("lie")) {
-			          // In-bed pose: head on the pillow with a blanket over the body,
-			          // drawn vertically (head up). The Ville's beds are all drawn
-			          // headboard-up -- the walkable "bed" tiles are just the pillow
-			          // row (a double bed is two pillow tiles side by side) and the
-			          // bed body extends downward -- so a head-up pose aligns with
-			          // every bed with NO rotation. (setAngle(0) above guarantees it.)
+			          // In-bed pose: head on the pillow with a blanket over the body.
+			          // The sprite is drawn head-up, so rotate it to this bed's
+			          // headboard direction -- the Ville has both vertical (head up)
+			          // and horizontal (head left) beds, so a fixed orientation left
+			          // sleepers lying sideways on the horizontal ones (BED_HEAD).
 			          curr_persona.setTexture(curr_persona_name, "lie");
+			          var bx = Math.round(curr_persona.body.x / tile_width);
+			          var by = Math.round(curr_persona.body.y / tile_width);
+			          var bhead = BED_HEAD[bx + "," + by] || "up";
+			          curr_persona.setAngle(BED_HEAD_ANGLE[bhead] || 0);
 			        } else if (idle_obj.indexOf("bed") >= 0) {
 			          // No in-bed frame in this sheet: face the camera, upright, on
 			          // the bed's pillow row.
